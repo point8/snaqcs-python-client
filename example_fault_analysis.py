@@ -12,6 +12,8 @@ Usage:
     python example_fault_analysis.py
 """
 
+import os
+
 from snaqcs import SnaqcsClient, ServerUnavailableError
 
 # ── Same circuit and code as example_mc_sampling.py ──────────────────────────
@@ -41,6 +43,11 @@ CODE = {
 
 def main():
     client = SnaqcsClient()
+    if "localhost" in client.base_url and not os.environ.get("SNAQCS_API_URL"):
+        print(
+            "Warning: SNAQCS_API_URL not set — connecting to local dev server.\n"
+            "For cloud access run:  export SNAQCS_API_URL=https://snaqcs.point8.cloud\n"
+        )
     print(f"Connected to {client.base_url}\n")
 
     result = client.enumerate_single_faults(

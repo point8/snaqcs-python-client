@@ -11,6 +11,8 @@ Usage:
     python example_mc_sampling.py
 """
 
+import os
+
 from snaqcs import SnaqcsClient, ServerUnavailableError
 
 # ── Circuit: simple [[7,1,3]] Steane code encoder ─────────────────────────────
@@ -49,11 +51,16 @@ NOISE_LEVELS = [
 ]
 
 NUM_SHOTS = 10_000
-SEED = 42
+SEED = None  # set to fixed seed for reproducible results
 
 
 def main():
     client = SnaqcsClient()
+    if "localhost" in client.base_url and not os.environ.get("SNAQCS_API_URL"):
+        print(
+            "Warning: SNAQCS_API_URL not set — connecting to local dev server.\n"
+            "For cloud access run:  export SNAQCS_API_URL=https://snaqcs.point8.cloud\n"
+        )
     print(f"Connected to {client.base_url}\n")
     print(f"Circuit:    [[7,1,3]] Steane code encoder ({NUM_SHOTS:,} shots per noise level)")
     print(f"{'p1 (1Q)':>10}  {'p2 (2Q)':>10}  {'p_L':>8}  {'2σ CI':>20}  {'uncorrectable':>14}")

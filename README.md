@@ -30,10 +30,13 @@ uv run example_fault_analysis.py
 The client requires an API key to connect to the snaQCs server:
 
 ```python
-# Pass the key directly
-client = SnaqcsClient(api_key="snaqcs_...")
+# Pass directly
+client = SnaqcsClient(api_key="snaqcs_...", base_url="https://snaqcs.point8.cloud")
+```
 
-# Or set environment variables
+Or export environment variables before running:
+
+```bash
 export SNAQCS_API_KEY=snaqcs_...
 export SNAQCS_API_URL=https://snaqcs.point8.cloud
 ```
