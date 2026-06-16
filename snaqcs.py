@@ -18,6 +18,10 @@ class ServerUnavailableError(Exception):
     """Raised when the SNAQCS server cannot be reached."""
 
 
+class UnexpectedResponseError(Exception):
+    """Raised when the server returns a non-JSON or unexpected response."""
+
+
 # ── Result types ──────────────────────────────────────────────────────────────
 
 @dataclass
@@ -211,7 +215,30 @@ class SnaqcsClient:
             .rstrip("/")
         )
         key = api_key or os.environ.get("SNAQCS_API_KEY")
+        is_local = "localhost" in self.base_url or "127.0.0.1" in self.base_url
+        if not key and not is_local:
+            raise AuthenticationError(
+                f"No API key provided for {self.base_url}. "
+                "Set SNAQCS_API_KEY environment variable or pass api_key=."
+            )
         self._session = _make_session(key)
+
+    def _parse_json(self, resp: requests.Response) -> Any:
+        if "oauth2/sign_in" in resp.url or "oauth2/auth" in resp.url:
+            raise AuthenticationError(
+                f"Request was redirected to OAuth2 login at {resp.url}. "
+                "API key is missing or invalid — set SNAQCS_API_KEY or pass api_key=."
+            )
+        try:
+            return resp.json()
+        except requests.exceptions.JSONDecodeError:
+            preview = repr(resp.text[:200])
+            raise UnexpectedResponseError(
+                f"Server returned HTTP {resp.status_code} with non-JSON body.\n"
+                f"URL: {resp.url}\n"
+                f"Content-Type: {resp.headers.get('Content-Type', 'unknown')}\n"
+                f"Body (first 200 chars): {preview}"
+            ) from None
 
     def _post(self, path: str, body: dict) -> Any:
         url = f"{self.base_url}{path}"
@@ -227,7 +254,7 @@ class SnaqcsClient:
                 "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
             )
         resp.raise_for_status()
-        return resp.json()
+        return self._parse_json(resp)
 
     def _get(self, path: str, params: Optional[dict] = None) -> Any:
         try:
@@ -242,7 +269,7 @@ class SnaqcsClient:
                 "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
             )
         resp.raise_for_status()
-        return resp.json()
+        return self._parse_json(resp)
 
     # ── Decoder ───────────────────────────────────────────────────────────────
 
