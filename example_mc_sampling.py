@@ -74,7 +74,7 @@ def main():
             noise_config=noise,
             num_samples=NUM_SHOTS,
             seed=SEED,
-            decoder_backend="numpy",
+            decoder_backend="stim",
             decoder_config={
                 "stabilizers": STABILIZERS,
                 "num_qubits": 7,

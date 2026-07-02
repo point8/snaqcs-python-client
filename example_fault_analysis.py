@@ -2,9 +2,10 @@
 Single-fault analysis for the [[7,1,3]] Steane code encoder.
 
 Enumerates every single-qubit fault location in the circuit, propagates each
-one through the encoder, and reports which gate positions produce correctable
-vs uncorrectable logical errors. Useful for identifying the most sensitive
-parts of the circuit without running a full Monte Carlo.
+one through the encoder, and decodes the resulting error against the real
+Steane stabilizers to report which faults are actually uncorrectable.
+Useful for identifying the most sensitive parts of the circuit without
+running a full Monte Carlo.
 
 Usage:
     export SNAQCS_API_KEY=snaqcs_...
@@ -30,15 +31,12 @@ CIRCUIT = {
     ],
 }
 
-CODE = {
-    "n": 7,
-    "k": 1,
-    "d": 3,
-    "x_stabilizers": ["IIIXXXX", "IXXIIXX", "XIXIXIX"],
-    "z_stabilizers": ["IIIZZZZ", "IZZIIZZ", "ZIZIZIZ"],
-    "logical_x": ["XXXXXXX"],
-    "logical_z": ["ZZZZZZZ"],
-}
+STABILIZERS = [
+    "+IIIXXXX", "+IXXIIXX", "+XIXIXIX",
+    "+IIIZZZZ", "+IZZIIZZ", "+ZIZIZIZ",
+]
+LOGICAL_X = "XXXXXXX"
+LOGICAL_Z = "ZZZZZZZ"
 
 
 def main():
@@ -50,51 +48,47 @@ def main():
         )
     print(f"Connected to {client.base_url}\n")
 
-    result = client.enumerate_single_faults(
+    result = client.enumerate_faults(
         circuit=CIRCUIT,
-        code_config=CODE,
+        max_fault_weight=1,
+        check_functions={},
         fault_types=["X", "Y", "Z"],
+        return_details=True,
     )
 
-    total = result["total_faults"]
-    correctable = result["correctable"]
-    uncorrectable = result["uncorrectable"]
-    p_L = result["uncorrectable_fraction"]
+    decoder = client.decoder(
+        stabilizers=STABILIZERS, num_qubits=7, logical_x=LOGICAL_X, logical_z=LOGICAL_Z
+    )
+    verdicts = decoder.decode_batch([f["final_error"] for f in result["faults"]])
+
+    total = len(verdicts)
+    uncorrectable = [
+        (f, v) for f, v in zip(result["faults"], verdicts) if not v.is_correctable
+    ]
 
     print("[[7,1,3]] Steane code — single-fault analysis")
     print("=" * 60)
-    print(f"Total fault locations : {total}")
-    print(f"Correctable           : {correctable}  ({100*correctable/total:.1f}%)")
-    print(f"Uncorrectable         : {uncorrectable}  ({100*uncorrectable/total:.1f}%)")
-    print(f"p_L (fault-rate model): {p_L:.4f}")
+    print(f"Total single faults : {total}")
+    print(f"Correctable         : {total - len(uncorrectable)}  "
+          f"({100*(total-len(uncorrectable))/total:.1f}%)")
+    print(f"Uncorrectable       : {len(uncorrectable)}  ({100*len(uncorrectable)/total:.1f}%)")
     print()
 
-    # Group uncorrectable faults by gate location for easier inspection
-    uncorrectable_faults = [f for f in result["faults"] if not f["is_correctable"]]
-    if not uncorrectable_faults:
-        print("All single faults are correctable.")
-        return
-
-    # Aggregate by (location, gate_name)
+    # Aggregate by gate location — each fault entry has a list under "fault"
     by_location: dict = {}
-    for f in uncorrectable_faults:
-        key = (f["location"], f.get("gate_name", "?"))
-        by_location.setdefault(key, []).append(f)
+    for f, v in uncorrectable:
+        for inner in f["fault"]:
+            key = inner["location"]
+            by_location.setdefault(key, []).append((inner, v))
 
-    print("Uncorrectable faults by gate location:")
-    print(f"  {'loc':>4}  {'gate':>6}  {'count':>6}  {'paulis'}")
+    print("Uncorrectable fault locations:")
+    print(f"  {'loc':>4}  {'count':>6}  {'paulis'}")
     print("  " + "-" * 44)
-    for (loc, gate), faults in sorted(by_location.items()):
-        paulis = ", ".join(
-            f"q{f['qubit']}:{f['pauli']}" for f in faults[:5]
-        )
-        if len(faults) > 5:
-            paulis += f" … (+{len(faults)-5} more)"
-        print(f"  {loc:>4}  {gate:>6}  {len(faults):>6}  {paulis}")
-
-    print()
-    print("loc  = gate index in the circuit (0-based)")
-    print("q    = qubit index, pauli = error type (X/Y/Z)")
+    for loc, entries in sorted(by_location.items()):
+        pauli_str = ", ".join(f"q{p['qubit']}:{p['pauli']}" for p, _ in entries[:5])
+        if len(entries) > 5:
+            pauli_str += f" … (+{len(entries)-5} more)"
+        print(f"  {loc:>4}  {len(entries):>6}  {pauli_str}")
 
 
 if __name__ == "__main__":
