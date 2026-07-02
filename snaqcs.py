@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -64,12 +64,9 @@ class LookupTableInfo:
 @dataclass
 class PropagationResult:
     """Result from propagating faults through a circuit."""
-    is_correctable: bool
     initial_error: str
     final_error: str
-    final_syndrome: dict
-    final_correction: dict
-    code_parameters: dict
+    has_superposition: bool
     intermediate_steps: list
 
 
@@ -187,7 +184,7 @@ class SnaqcsClient:
     Production::
 
         client = SnaqcsClient(api_key="snaqcs_...")  # or set SNAQCS_API_KEY env var
-        # base URL defaults to SNAQCS_API_URL env var, then http://localhost:6090
+        # base URL defaults to SNAQCS_API_URL env var
 
     Quick decode::
 
@@ -201,14 +198,15 @@ class SnaqcsClient:
 
     Fault propagation::
 
-        result = client.propagate(circuit={...}, faults=[...], code_config={...})
-        print(result.is_correctable, result.final_error)
+        result = client.propagate(circuit={...}, faults=[...])
+        print(result.final_error, result.has_superposition)
     """
 
     def __init__(
         self,
         base_url: Optional[str] = None,
         api_key: Optional[str] = None,
+        timeout: float = 60.0,
     ) -> None:
         self.base_url = (
             (base_url or os.environ.get("SNAQCS_API_URL") or "http://localhost:6090")
@@ -222,6 +220,7 @@ class SnaqcsClient:
                 "Set SNAQCS_API_KEY environment variable or pass api_key=."
             )
         self._session = _make_session(key)
+        self.timeout = timeout
 
     def _parse_json(self, resp: requests.Response) -> Any:
         if "oauth2/sign_in" in resp.url or "oauth2/auth" in resp.url:
@@ -243,7 +242,7 @@ class SnaqcsClient:
     def _post(self, path: str, body: dict) -> Any:
         url = f"{self.base_url}{path}"
         try:
-            resp = self._session.post(url, json=body, timeout=60)
+            resp = self._session.post(url, json=body, timeout=self.timeout)
         except requests.exceptions.ConnectionError:
             raise ServerUnavailableError(
                 f"Cannot reach SNAQCS server at {self.base_url}. "
@@ -354,30 +353,21 @@ class SnaqcsClient:
         self,
         circuit: dict,
         faults: list,
-        code_config: dict,
-        decoder_type: str = "table",
-        return_intermediate: bool = True,
     ) -> PropagationResult:
         """
-        Propagate faults through a circuit and analyse correctability.
+        Propagate faults through a circuit.
 
         ``faults`` is a list of ``{"location": N, "qubit": Q, "pauli": "X"}`` dicts.
         ``location=N`` means the error appears after gate N; ``location=-1`` is a prep fault.
         """
-        data = self._post("/api/propagate_with_correctability", {
+        data = self._post("/api/propagate", {
             "circuit": circuit,
             "faults": faults,
-            "code_config": code_config,
-            "decoder_type": decoder_type,
-            "return_intermediate": return_intermediate,
         })
         return PropagationResult(
-            is_correctable=data["is_correctable"],
             initial_error=data["initial_error"],
             final_error=data["final_error"],
-            final_syndrome=data["final_syndrome"],
-            final_correction=data["final_correction"],
-            code_parameters=data["code_parameters"],
+            has_superposition=data["has_superposition"],
             intermediate_steps=data.get("intermediate_steps", []),
         )
 
@@ -385,33 +375,59 @@ class SnaqcsClient:
         self,
         circuit: dict,
         max_fault_weight: int,
-        code_config: Optional[dict] = None,
+        check_functions: Dict[str, str],
+        fault_types: Optional[list] = None,
+        return_details: bool = False,
+        sample_size: Optional[int] = None,
     ) -> dict:
-        """Enumerate all fault configurations up to a given weight."""
-        return self._post("/api/enumerate_faults", {
+        """Enumerate all fault configurations up to a given weight.
+
+        ``check_functions`` is a dict of named simpleeval expressions evaluated
+        per-fault 
+        """
+        body: dict = {
             "circuit": circuit,
             "max_fault_weight": max_fault_weight,
-            "code_config": code_config,
-        })
+            "check_functions": check_functions,
+            "return_details": return_details,
+        }
+        if fault_types is not None:
+            body["fault_types"] = fault_types
+        if sample_size is not None:
+            body["sample_size"] = sample_size
+        return self._post("/api/enumerate_faults", body)
 
     # ── Sampling ──────────────────────────────────────────────────────────────
 
     def sample(
         self,
         circuit: dict,
-        code_config: dict,
+        check_functions: Dict[str, str],
         noise_config: Optional[dict] = None,
         num_samples: int = 1000,
         seed: Optional[int] = None,
+        return_sample_details: bool = False,
+        propagation_backend: Optional[str] = None,
+        decoder_backend: Optional[str] = None,
+        decoder_config: Optional[dict] = None,
     ) -> dict:
-        """Monte Carlo fault sampling for a single circuit with depolarizing noise."""
-        return self._post("/api/direct_sampler", {
+        """Monte Carlo fault sampling for a single circuit with depolarizing noise.
+        """
+        body: dict = {
             "circuit": circuit,
-            "code_config": code_config,
+            "check_functions": check_functions,
             "noise_config": noise_config or {},
             "num_samples": num_samples,
             "seed": seed,
-        })
+            "return_sample_details": return_sample_details,
+        }
+        if propagation_backend is not None:
+            body["propagation_backend"] = propagation_backend
+        if decoder_backend is not None:
+            body["decoder_backend"] = decoder_backend
+        if decoder_config is not None:
+            body["decoder_config"] = decoder_config
+        return self._post("/api/direct_sampler", body)
 
     def sample_protocol(
         self,
@@ -419,14 +435,22 @@ class SnaqcsClient:
         noise_config: Optional[dict] = None,
         num_samples: int = 1000,
         seed: Optional[int] = None,
+        backend: Optional[str] = None,
+        workers: Optional[int] = None,
     ) -> dict:
-        """Monte Carlo fault sampling for a multi-circuit protocol."""
-        return self._post("/api/protocol/direct_sampler", {
+        """Monte Carlo fault sampling for a multi-circuit protocol.
+        """
+        body = {
             "config": config,
             "noise_config": noise_config or {},
             "num_samples": num_samples,
             "seed": seed,
-        })
+        }
+        if backend is not None:
+            body["backend"] = backend
+        if workers is not None:
+            body["workers"] = workers
+        return self._post("/api/protocol/direct_sampler", body)
 
     # ── Fault analysis ────────────────────────────────────────────────────────
 
@@ -447,31 +471,35 @@ class SnaqcsClient:
         self,
         circuit: dict,
         faults: list,
-        code_config: Optional[dict] = None,
+        check_functions: Dict[str, str],
         return_intermediate: bool = False,
     ) -> dict:
-        """Propagate multiple simultaneous faults and return the combined error."""
+        """Propagate multiple simultaneous faults and evaluate check_functions."""
         return self._post("/api/multiple_faults", {
             "circuit": circuit,
             "faults": faults,
-            "code_config": code_config,
+            "check_functions": check_functions,
             "return_intermediate": return_intermediate,
         })
 
-    def enumerate_single_faults(
+    def enumerate_pauli_faults(
         self,
         circuit: dict,
         code_config: Optional[dict] = None,
         fault_types: Optional[list] = None,
         include_idle: bool = False,
     ) -> dict:
-        """Enumerate every single-fault location in the circuit."""
-        return self._post("/api/enumerate_single_faults", {
+        """Enumerate every single-qubit Pauli error in the circuit.
+        """
+        return self._post("/api/enumerate_pauli_faults", {
             "circuit": circuit,
             "code_config": code_config,
             "fault_types": fault_types or ["X", "Y", "Z"],
             "include_idle": include_idle,
         })
+
+    # Backward-compat alias (one-release deprecation; remove next major).
+    enumerate_single_faults = enumerate_pauli_faults
 
     def wilson_ci(
         self,
@@ -493,13 +521,13 @@ class SnaqcsClient:
 
     # ── Protocol ──────────────────────────────────────────────────────────────
 
-    def simulate_protocol(
+    def propagate_protocol(
         self,
         config: dict,
         faults: list,
     ) -> dict:
-        """Simulate a specific fault scenario through a multi-circuit protocol."""
-        return self._post("/api/protocol/simulate", {
+        """Propagate a specific fault scenario through a multi-circuit protocol."""
+        return self._post("/api/protocol/propagate", {
             "config": config,
             "faults": faults,
         })
