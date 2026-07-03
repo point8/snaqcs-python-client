@@ -1,9 +1,11 @@
 """SNAQCS Python client — single entry point for all API operations."""
 from __future__ import annotations
 
+import json
 import os
+import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Iterator, Optional
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -20,6 +22,22 @@ class ServerUnavailableError(Exception):
 
 class UnexpectedResponseError(Exception):
     """Raised when the server returns a non-JSON or unexpected response."""
+
+
+class JobError(Exception):
+    """Base class for sampler-job errors."""
+
+
+class JobFailedError(JobError):
+    """Raised by ``SamplerJob.wait()`` when the job ends in ``failed``."""
+
+
+class JobCancelledError(JobError):
+    """Raised by ``SamplerJob.wait()`` when the job ends in ``cancelled``."""
+
+
+class JobNotCompletedError(JobError):
+    """Raised by ``SamplerJob.result`` when the job hasn't completed yet."""
 
 
 # ── Result types ──────────────────────────────────────────────────────────────
@@ -552,6 +570,15 @@ class SnaqcsClient:
             self._circuits = Circuits(self)
         return self._circuits
 
+    # ── Sampler jobs ──────────────────────────────────────────────────────────
+
+    @property
+    def jobs(self) -> "Jobs":
+        """Sub-client for background sampler jobs (``client.jobs.submit_direct_sampler(...)``, etc.)."""
+        if not hasattr(self, "_jobs"):
+            self._jobs = Jobs(self)
+        return self._jobs
+
     # ── Health ────────────────────────────────────────────────────────────────
 
     def health(self) -> dict:
@@ -662,3 +689,226 @@ class Circuits:
         if name:
             body["name"] = name
         return self._client._post("/api/circuits/import/qasm", body)
+
+
+# ── Sampler jobs sub-client ──────────────────────────────────────────────────
+
+# Must match _TERMINAL_STATUSES in backend/app/routes/jobs.py — no shared
+# source of truth across the wire, so keep these two in sync by hand.
+_TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
+
+
+class SamplerJob:
+    """
+    Handle for an async sampler job.
+
+    Created by ``client.jobs.submit_direct_sampler(...)`` or
+    ``client.jobs.get(id)``. Holds a snapshot plus a reference to the
+    client, the same shape as ``Decoder`` — submit returns immediately,
+    ``.wait()`` blocks until terminal, ``.stream()`` yields progress,
+    ``.cancel()`` is best-effort.
+
+    Example::
+
+        job = client.jobs.submit_direct_sampler({
+            "circuit": {...},
+            "check_functions": {"anyError": "weight > 0"},
+            "num_samples": 10_000,
+        })
+        job = job.wait()
+        print(job.result["decoder_summary"])
+    """
+
+    def __init__(self, client: "SnaqcsClient", snapshot: dict) -> None:
+        self._client = client
+        self._snap = snapshot
+
+    @property
+    def id(self) -> str:
+        return self._snap["id"]
+
+    @property
+    def status(self) -> str:
+        return self._snap["status"]
+
+    @property
+    def progress(self) -> Optional[dict]:
+        return self._snap.get("progress")
+
+    @property
+    def result(self) -> dict:
+        if self._snap["status"] != "completed":
+            raise JobNotCompletedError(
+                f"Job {self.id} is {self._snap['status']!r}, not completed"
+            )
+        return self._snap["result"]
+
+    @property
+    def error(self) -> Optional[dict]:
+        return self._snap.get("error")
+
+    def refresh(self) -> "SamplerJob":
+        """Re-fetch the current snapshot from the server."""
+        self._snap = self._client._get(f"/api/sampler/jobs/{self.id}")
+        return self
+
+    def wait(self, timeout: Optional[float] = None, poll: float = 2.0) -> "SamplerJob":
+        """Block until the job reaches a terminal state, then return self.
+
+        Raises ``JobFailedError``/``JobCancelledError`` on those terminal
+        states; ``TimeoutError`` if ``timeout`` elapses first.
+        """
+        start = time.monotonic()
+        while self.status not in _TERMINAL_JOB_STATUSES:
+            if timeout is not None and time.monotonic() - start > timeout:
+                raise TimeoutError(f"Job {self.id} did not finish within {timeout}s")
+            time.sleep(poll)
+            self.refresh()
+        if self.status == "failed":
+            err = self.error or {}
+            raise JobFailedError(err.get("message", "unknown error"))
+        if self.status == "cancelled":
+            raise JobCancelledError(f"Job {self.id} was cancelled")
+        return self
+
+    def stream(self, timeout: Optional[float] = None) -> Iterator[dict]:
+        """Yield progress snapshots via SSE, updating ``self`` as they arrive.
+
+        ``timeout`` is a total wall-clock budget for the whole call — the
+        same semantics as ``wait()``'s ``timeout`` — not a per-request
+        socket timeout. It's enforced both while the SSE connection is open
+        and after falling back to polling, so a caller who passes
+        ``timeout=120`` gets ``TimeoutError`` around 120s of real time
+        either way. Pass ``None`` (default) to run until the job reaches a
+        terminal state, however long that takes.
+
+        Falls back to polling (2s) when the SSE connection can't be opened
+        or drops mid-stream — e.g. behind a reverse proxy not yet
+        configured for long-lived streaming responses. A 401 is never
+        treated as a transient drop: it's checked explicitly and raises
+        ``AuthenticationError`` immediately, matching every other method on
+        this client. Likewise, the backend's ``{"error": "not_found"}``
+        sentinel (emitted once when the job is soft-deleted mid-stream)
+        raises ``JobError`` instead of silently becoming ``self._snap``'s
+        new shape and breaking ``.status``/``.id`` on the next access.
+        """
+        deadline = None if timeout is None else time.monotonic() + timeout
+
+        def _check_deadline():
+            if deadline is not None and time.monotonic() > deadline:
+                raise TimeoutError(f"Job {self.id} did not finish within {timeout}s")
+
+        url = f"{self._client.base_url}/api/sampler/jobs/{self.id}/stream"
+        try:
+            with self._client._session.get(url, stream=True, timeout=timeout) as resp:
+                if resp.status_code == 401:
+                    raise AuthenticationError(
+                        "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
+                    )
+                resp.raise_for_status()
+                for line in resp.iter_lines(decode_unicode=True):
+                    _check_deadline()
+                    if not line or not line.startswith("data:"):
+                        continue
+                    snap = json.loads(line[len("data:"):].strip())
+                    if "error" in snap and "status" not in snap:
+                        raise JobError(f"Job {self.id} stream error: {snap['error']}")
+                    self._snap = snap
+                    yield snap
+                    if snap.get("status") in _TERMINAL_JOB_STATUSES:
+                        return
+        except requests.RequestException:
+            while True:
+                _check_deadline()
+                self.refresh()
+                yield self._snap
+                if self.status in _TERMINAL_JOB_STATUSES:
+                    return
+                time.sleep(2.0)
+
+    def cancel(self, reason: Optional[str] = None) -> "SamplerJob":
+        """Request cancellation. Best-effort — the worker checks at the next
+        progress tick, so the job may not be ``cancelled`` immediately."""
+        body = {"reason": reason} if reason else {}
+        self._client._post(f"/api/sampler/jobs/{self.id}/cancel", body)
+        return self.refresh()
+
+    def delete(self) -> None:
+        """Soft-delete the job."""
+        resp = self._client._session.delete(
+            f"{self._client.base_url}/api/sampler/jobs/{self.id}", timeout=30
+        )
+        if resp.status_code == 401:
+            raise AuthenticationError(
+                "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
+            )
+        resp.raise_for_status()
+
+    def __repr__(self) -> str:
+        return f"SamplerJob(id={self.id!r}, status={self.status!r})"
+
+
+class Jobs:
+    """
+    Background sampler jobs sub-client. Access via ``client.jobs``.
+
+    Example::
+
+        job = client.jobs.submit_direct_sampler({...})
+        job.wait()
+        for j in client.jobs.list(status="running"):
+            print(j.id, j.progress)
+    """
+
+    def __init__(self, client: "SnaqcsClient") -> None:
+        self._client = client
+
+    def submit_direct_sampler(self, request: dict) -> SamplerJob:
+        """Submit a direct-sampler job over a protocol graph.
+
+        ``request`` is the same shape ``sample_protocol()`` posts to
+        ``/api/protocol/direct_sampler`` — ``{"config": ..., "noise_config":
+        ..., "num_samples": ..., "seed": ..., "backend": ...}``. This is the
+        protocol-graph sampler; for a single circuit see
+        ``submit_circuit_direct_sampler`` instead.
+        """
+        data = self._client._post(
+            "/api/sampler/jobs", {"kind": "direct_sampler", "request": request}
+        )
+        return self.get(data["job_id"])
+
+    def submit_circuit_direct_sampler(self, request: dict) -> SamplerJob:
+        """Submit a single-circuit direct-sampler job.
+
+        ``request`` is the same shape ``sample()`` posts to
+        ``/api/direct_sampler`` — ``circuit``, ``check_functions``,
+        ``noise_config``, ``num_samples``, ``seed``, ``propagation_backend``,
+        ``decoder_backend``/``decoder_config``, etc. (see
+        ``SnaqcsClient.sample``'s docstring). Progress streams the same way
+        as any other job — ``job.wait()`` or ``job.stream()``.
+        """
+        data = self._client._post(
+            "/api/sampler/jobs",
+            {"kind": "circuit_direct_sampler", "request": request},
+        )
+        return self.get(data["job_id"])
+
+    def get(self, job_id: str) -> SamplerJob:
+        """Fetch a job by id."""
+        return SamplerJob(self._client, self._client._get(f"/api/sampler/jobs/{job_id}"))
+
+    def list(
+        self,
+        status: Optional[str] = None,
+        kind: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list:
+        """List the caller's jobs, newest first."""
+        params: dict = {"limit": limit, "offset": offset}
+        if status:
+            params["status"] = status
+        if kind:
+            params["kind"] = kind
+        data = self._client._get("/api/sampler/jobs", params=params)
+        return [SamplerJob(self._client, item) for item in data["items"]]

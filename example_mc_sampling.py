@@ -1,9 +1,10 @@
 """
-Monte Carlo logical error rate estimation for the [[7,1,3]] Steane code.
+Monte Carlo logical error rate estimation for the [[7,1,3]] Steane code,
+run as a background sampler job.
 
-Runs the direct sampler at several noise levels, decodes each sample's
-propagated error against the real Steane stabilizers, and prints p_L with a
-2σ Wilson confidence interval for each noise level.
+Submits one async job per noise level via ``client.jobs``, waits for each to
+finish, decodes against the real Steane stabilizers server-side, and prints
+p_L with a 2σ Wilson confidence interval for each noise level.
 
 Usage:
     export SNAQCS_API_KEY=snaqcs_...
@@ -13,7 +14,7 @@ Usage:
 
 import os
 
-from snaqcs import SnaqcsClient, ServerUnavailableError
+from snaqcs import JobFailedError, ServerUnavailableError, SnaqcsClient
 
 # ── Circuit: simple [[7,1,3]] Steane code encoder ─────────────────────────────
 # One H gate prepares the logical qubit; six CNOT gates spread it to all data
@@ -50,6 +51,7 @@ NOISE_LEVELS = [
 
 NUM_SHOTS = 10_000
 SEED = None  # set to fixed seed for reproducible results
+JOB_TIMEOUT = 120.0  # seconds to wait for each job before giving up
 
 
 def main():
@@ -62,27 +64,39 @@ def main():
     print(f"Connected to {client.base_url}\n")
     print(f"Circuit: [[7,1,3]] Steane code encoder ({NUM_SHOTS:,} shots per noise level)")
     print("p_L estimated by decoding each sample against the real Steane stabilizers.")
+    print("Each noise level runs as a background job — submit returns immediately,")
+    print("wait() polls until it completes.\n")
     print(f"{'p1 (1Q)':>10}  {'p2 (2Q)':>10}  {'shots':>8}  {'p_L':>8}  {'2σ CI':>20}")
     print("-" * 68)
 
     for noise in NOISE_LEVELS:
-        result = client.sample(
-            circuit=CIRCUIT,
+        job = client.jobs.submit_circuit_direct_sampler({
+            "circuit": CIRCUIT,
             # check_functions is a required field on this endpoint, but we
             # only care about decoder_summary below, not this predicate.
-            check_functions={"anyError": "weight > 0"},
-            noise_config=noise,
-            num_samples=NUM_SHOTS,
-            seed=SEED,
-            decoder_backend="stim",
-            decoder_config={
+            "check_functions": {"anyError": "weight > 0"},
+            "noise_config": noise,
+            "num_samples": NUM_SHOTS,
+            "seed": SEED,
+            "decoder_backend": "stim",
+            "decoder_config": {
                 "stabilizers": STABILIZERS,
                 "num_qubits": 7,
                 "logical_x": LOGICAL_X,
                 "logical_z": LOGICAL_Z,
             },
-        )
-        summary = result["decoder_summary"]
+        })
+        try:
+            job = job.wait(timeout=JOB_TIMEOUT, poll=1.0)
+        except JobFailedError as e:
+            print(f"Job {job.id} failed: {e}")
+            continue
+        except TimeoutError:
+            print(f"Job {job.id} did not finish within {JOB_TIMEOUT}s — "
+                  f"still running server-side, skipping for now.")
+            continue
+
+        summary = job.result["decoder_summary"]
         num_uncorrectable = summary["false"]
         ci = client.wilson_ci(num_success=num_uncorrectable, num_total=NUM_SHOTS, ci_z=2.0)
         p_L = num_uncorrectable / NUM_SHOTS
