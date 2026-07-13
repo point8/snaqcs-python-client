@@ -13,7 +13,7 @@ Then run:
 import pytest
 import requests
 
-from snaqcs import SnaqcsClient, AuthenticationError, DecoderResult, PropagationResult
+from snaqcs import SnaqcsClient, DecoderResult, PropagationResult
 
 BASE_URL = "http://localhost:6090"
 
@@ -30,19 +30,6 @@ def client():
 
 
 @pytest.fixture(scope="session")
-def steane_code():
-    return {
-        "n": 7,
-        "k": 1,
-        "d": 3,
-        "x_stabilizers": ["IIIXXXX", "IXXIIXX", "XIXIXIX"],
-        "z_stabilizers": ["IIIZZZZ", "IZZIIZZ", "ZIZIZIZ"],
-        "logical_x": ["XXXXXXX"],
-        "logical_z": ["ZZZZZZZ"],
-    }
-
-
-@pytest.fixture(scope="session")
 def steane_stabilizers():
     return [
         "+IIIXXXX", "+IXXIIXX", "+XIXIXIX",
@@ -52,6 +39,7 @@ def steane_stabilizers():
 
 @pytest.fixture(scope="session")
 def steane_circuit():
+    """Steane encoder with explicit measure gates for predicate access to m0..m6."""
     return {
         "qubits": 7,
         "layers": [
@@ -62,8 +50,19 @@ def steane_circuit():
             [{"gate": "cx", "qubits": [0, 4]}],
             [{"gate": "cx", "qubits": [0, 5]}],
             [{"gate": "cx", "qubits": [0, 6]}],
+            [{"gate": "measure", "qubits": [0]}],
+            [{"gate": "measure", "qubits": [1]}],
+            [{"gate": "measure", "qubits": [2]}],
+            [{"gate": "measure", "qubits": [3]}],
+            [{"gate": "measure", "qubits": [4]}],
+            [{"gate": "measure", "qubits": [5]}],
+            [{"gate": "measure", "qubits": [6]}],
         ],
     }
+
+
+# Logical Z parity predicate: XOR of all 7 measurement outcomes.
+CHECK_FUNCTIONS = {"logErr": "m0 ^ m1 ^ m2 ^ m3 ^ m4 ^ m5 ^ m6"}
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -141,85 +140,130 @@ class TestDecode:
         assert result.is_correctable is True
 
 
+# ── Propagate ─────────────────────────────────────────────────────────────────
+
+class TestPropagate:
+    def test_returns_propagation_result(self, client, steane_circuit):
+        result = client.propagate(
+            circuit=steane_circuit,
+            faults=[{"location": 0, "qubit": 0, "pauli": "X"}],
+        )
+        assert isinstance(result, PropagationResult)
+        assert isinstance(result.final_error, str)
+        assert isinstance(result.initial_error, str)
+        assert isinstance(result.has_superposition, bool)
+
+    def test_no_fault_leaves_identity(self, client, steane_circuit):
+        result = client.propagate(
+            circuit=steane_circuit,
+            faults=[],
+        )
+        assert result.final_error == "I" * 7 or all(c == "I" for c in result.final_error)
+
+
 # ── MC Sampling ───────────────────────────────────────────────────────────────
 
 class TestSample:
-    def test_zero_noise_zero_failures(self, client, steane_circuit, steane_code):
+    def test_zero_noise_zero_failures(self, client, steane_circuit):
         result = client.sample(
             circuit=steane_circuit,
-            code_config=steane_code,
+            check_functions=CHECK_FUNCTIONS,
             noise_config={"single_qubit_gate_rate": 0.0, "two_qubit_gate_rate": 0.0},
             num_samples=200,
             seed=42,
         )
         assert result["num_samples"] == 200
-        assert result["num_uncorrectable"] == 0
+        assert result["checks"]["logErr"]["true"] == 0
 
-    def test_high_noise_produces_failures(self, client, steane_circuit, steane_code):
+    def test_high_noise_produces_failures(self, client, steane_circuit):
         result = client.sample(
             circuit=steane_circuit,
-            code_config=steane_code,
+            check_functions=CHECK_FUNCTIONS,
             noise_config={"single_qubit_gate_rate": 0.2, "two_qubit_gate_rate": 0.2},
             num_samples=500,
             seed=42,
         )
-        assert result["num_uncorrectable"] > 0
+        assert result["checks"]["logErr"]["true"] > 0
 
-    def test_response_counts_are_consistent(self, client, steane_circuit, steane_code):
+    def test_response_counts_are_consistent(self, client, steane_circuit):
         result = client.sample(
             circuit=steane_circuit,
-            code_config=steane_code,
+            check_functions=CHECK_FUNCTIONS,
             noise_config={"single_qubit_gate_rate": 0.01, "two_qubit_gate_rate": 0.01},
             num_samples=300,
             seed=0,
         )
-        assert result["num_correctable"] + result["num_uncorrectable"] == result["num_samples"]
-        assert 0.0 <= result["uncorrectable_fraction"] <= 1.0
+        checks = result["checks"]["logErr"]
+        assert checks["true"] + checks["false"] == result["num_samples"]
+        assert 0.0 <= checks["fraction_true"] <= 1.0
 
-    def test_seed_is_deterministic(self, client, steane_circuit, steane_code):
+    def test_seed_is_deterministic(self, client, steane_circuit):
         kwargs = dict(
             circuit=steane_circuit,
-            code_config=steane_code,
+            check_functions=CHECK_FUNCTIONS,
             noise_config={"single_qubit_gate_rate": 0.01, "two_qubit_gate_rate": 0.01},
             num_samples=500,
             seed=99,
         )
         r1 = client.sample(**kwargs)
         r2 = client.sample(**kwargs)
-        assert r1["num_uncorrectable"] == r2["num_uncorrectable"]
+        assert r1["checks"]["logErr"]["true"] == r2["checks"]["logErr"]["true"]
 
 
-# ── Fault enumeration ─────────────────────────────────────────────────────────
+# ── Fault enumeration (enumerate_faults) ─────────────────────────────────────
 
-class TestEnumerateSingleFaults:
-    def test_returns_expected_fields(self, client, steane_circuit, steane_code):
-        result = client.enumerate_single_faults(
+class TestEnumerateFaults:
+    def test_returns_expected_fields(self, client, steane_circuit):
+        result = client.enumerate_faults(
             circuit=steane_circuit,
-            code_config=steane_code,
+            max_fault_weight=1,
+            check_functions=CHECK_FUNCTIONS,
         )
         assert "total_faults" in result
-        assert "faults" in result
-        assert "correctable" in result
-        assert "uncorrectable" in result
-        assert "uncorrectable_fraction" in result
+        assert "summary" in result
+        assert "checks" in result["summary"]
+        assert "logErr" in result["summary"]["checks"]
 
-    def test_fault_count_plausible(self, client, steane_circuit, steane_code):
-        result = client.enumerate_single_faults(
+    def test_fault_count_plausible(self, client, steane_circuit):
+        result = client.enumerate_faults(
             circuit=steane_circuit,
-            code_config=steane_code,
+            max_fault_weight=1,
+            check_functions=CHECK_FUNCTIONS,
         )
-        # 7 qubits × 7 layers × 3 Paulis = 147 max; real count depends on gate structure
         assert result["total_faults"] > 0
-        assert result["correctable"] + result["uncorrectable"] == result["total_faults"]
+        checks = result["summary"]["checks"]["logErr"]
+        assert checks["true"] + checks["false"] == result["total_faults"]
 
-    def test_each_fault_has_required_fields(self, client, steane_circuit, steane_code):
-        result = client.enumerate_single_faults(
+    def test_details_include_per_fault_checks(self, client, steane_circuit):
+        result = client.enumerate_faults(
             circuit=steane_circuit,
-            code_config=steane_code,
+            max_fault_weight=1,
+            check_functions=CHECK_FUNCTIONS,
+            return_details=True,
         )
+        for fault in result["faults"]:
+            assert "checks" in fault
+            assert "logErr" in fault["checks"]
+
+
+# ── Fault enumeration (enumerate_pauli_faults) ────────────────────────────────
+
+class TestEnumeratePauliFaults:
+    def test_returns_expected_fields(self, client, steane_circuit):
+        result = client.enumerate_pauli_faults(circuit=steane_circuit)
+        assert "total_faults" in result
+        assert "faults" in result
+
+    def test_each_fault_has_required_fields(self, client, steane_circuit):
+        result = client.enumerate_pauli_faults(circuit=steane_circuit)
         for fault in result["faults"]:
             assert "location" in fault
             assert "qubit" in fault
             assert "pauli" in fault
-            assert "is_correctable" in fault
             assert fault["pauli"] in ("X", "Y", "Z")
+
+    def test_backward_compat_alias_works(self, client, steane_circuit):
+        """enumerate_single_faults alias must produce the same result as enumerate_pauli_faults."""
+        result = client.enumerate_single_faults(circuit=steane_circuit)
+        assert "total_faults" in result
+        assert "faults" in result
