@@ -88,18 +88,73 @@ class PropagationResult:
     intermediate_steps: list
 
 
+# ── Transport ─────────────────────────────────────────────────────────────────
+
+class _Transport:
+    """Owns the HTTP session; the one place ConnectionError -> ServerUnavailableError
+    and HTTP 401 -> AuthenticationError are translated.
+
+    SnaqcsClient, Circuits, and Jobs/SamplerJob all send requests through the
+    same _Transport instance via send() (raw Response) or send_json() (parsed
+    body), instead of each re-implementing this translation.
+    """
+
+    def __init__(self, base_url: str, api_key: Optional[str], timeout: float) -> None:
+        self.base_url = base_url
+        self.timeout = timeout
+        self._session = requests.Session()
+        retry = Retry(total=3, connect=0, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504])
+        adapter = HTTPAdapter(max_retries=retry)
+        self._session.mount("http://", adapter)
+        self._session.mount("https://", adapter)
+        if api_key:
+            self._session.headers["Authorization"] = f"Bearer {api_key}"
+
+    def send(
+        self,
+        method: str,
+        path: str,
+        *,
+        translate_auth_errors: bool = True,
+        **kwargs,
+    ) -> requests.Response:
+        kwargs.setdefault("timeout", self.timeout)
+        url = f"{self.base_url}{path}"
+        request = getattr(self._session, method.lower())
+        try:
+            resp = request(url, **kwargs)
+        except requests.exceptions.ConnectionError:
+            raise ServerUnavailableError(
+                f"Cannot reach SNAQCS server at {self.base_url}. "
+                "Check SNAQCS_API_URL or start the local dev server."
+            )
+        if translate_auth_errors and resp.status_code == 401:
+            raise AuthenticationError(
+                "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
+            )
+        return resp
+
+    def send_json(self, method: str, path: str, **kwargs) -> Any:
+        resp = self.send(method, path, **kwargs)
+        resp.raise_for_status()
+        if "oauth2/sign_in" in resp.url or "oauth2/auth" in resp.url:
+            raise AuthenticationError(
+                f"Request was redirected to OAuth2 login at {resp.url}. "
+                "API key is missing or invalid — set SNAQCS_API_KEY or pass api_key=."
+            )
+        try:
+            return resp.json()
+        except requests.exceptions.JSONDecodeError:
+            preview = repr(resp.text[:200])
+            raise UnexpectedResponseError(
+                f"Server returned HTTP {resp.status_code} with non-JSON body.\n"
+                f"URL: {resp.url}\n"
+                f"Content-Type: {resp.headers.get('Content-Type', 'unknown')}\n"
+                f"Body (first 200 chars): {preview}"
+            ) from None
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
-
-def _make_session(api_key: Optional[str]) -> requests.Session:
-    session = requests.Session()
-    retry = Retry(total=3, connect=0, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504])
-    adapter = HTTPAdapter(max_retries=retry)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    if api_key:
-        session.headers["Authorization"] = f"Bearer {api_key}"
-    return session
-
 
 def _parse_decoder_result(data: dict) -> DecoderResult:
     return DecoderResult(
@@ -237,56 +292,14 @@ class SnaqcsClient:
                 f"No API key provided for {self.base_url}. "
                 "Set SNAQCS_API_KEY environment variable or pass api_key=."
             )
-        self._session = _make_session(key)
         self.timeout = timeout
-
-    def _parse_json(self, resp: requests.Response) -> Any:
-        if "oauth2/sign_in" in resp.url or "oauth2/auth" in resp.url:
-            raise AuthenticationError(
-                f"Request was redirected to OAuth2 login at {resp.url}. "
-                "API key is missing or invalid — set SNAQCS_API_KEY or pass api_key=."
-            )
-        try:
-            return resp.json()
-        except requests.exceptions.JSONDecodeError:
-            preview = repr(resp.text[:200])
-            raise UnexpectedResponseError(
-                f"Server returned HTTP {resp.status_code} with non-JSON body.\n"
-                f"URL: {resp.url}\n"
-                f"Content-Type: {resp.headers.get('Content-Type', 'unknown')}\n"
-                f"Body (first 200 chars): {preview}"
-            ) from None
+        self._transport = _Transport(self.base_url, key, timeout)
 
     def _post(self, path: str, body: dict) -> Any:
-        url = f"{self.base_url}{path}"
-        try:
-            resp = self._session.post(url, json=body, timeout=self.timeout)
-        except requests.exceptions.ConnectionError:
-            raise ServerUnavailableError(
-                f"Cannot reach SNAQCS server at {self.base_url}. "
-                "Check SNAQCS_API_URL or start the local dev server."
-            )
-        if resp.status_code == 401:
-            raise AuthenticationError(
-                "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
-            )
-        resp.raise_for_status()
-        return self._parse_json(resp)
+        return self._transport.send_json("POST", path, json=body)
 
     def _get(self, path: str, params: Optional[dict] = None) -> Any:
-        try:
-            resp = self._session.get(f"{self.base_url}{path}", params=params, timeout=30)
-        except requests.exceptions.ConnectionError:
-            raise ServerUnavailableError(
-                f"Cannot reach SNAQCS server at {self.base_url}. "
-                "Check SNAQCS_API_URL or start the local dev server."
-            )
-        if resp.status_code == 401:
-            raise AuthenticationError(
-                "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
-            )
-        resp.raise_for_status()
-        return self._parse_json(resp)
+        return self._transport.send_json("GET", path, params=params, timeout=30)
 
     # ── Decoder ───────────────────────────────────────────────────────────────
 
@@ -470,6 +483,30 @@ class SnaqcsClient:
             body["workers"] = workers
         return self._post("/api/protocol/direct_sampler", body)
 
+    def sample_protocol_subset(
+        self,
+        *,
+        config: dict,
+        noise_config: dict,
+        susa_config: dict,
+        num_samples: int = 100_000,
+        seed: int | None = None,
+    ) -> dict:
+        """POST /api/protocol/subset_sampler — SUSA weight-stratified DSS sampling.
+
+        susa_config keys: max_weight (int), shots_per_task (int), eta_max (float),
+                          n_max (int, optional), backend (str, optional).
+        Returns a superset of the direct_sampler response with extra DSS fields:
+        p_logical, p_lower, p_upper, sigma_L, sigma_U, delta, eta.
+        """
+        return self._post("/api/protocol/subset_sampler", {
+            "config": config,
+            "noise_config": noise_config,
+            "num_samples": num_samples,
+            "seed": seed,
+            "susa_config": susa_config,
+        })
+
     # ── Fault analysis ────────────────────────────────────────────────────────
 
     def syndrome(
@@ -582,14 +619,13 @@ class SnaqcsClient:
     # ── Health ────────────────────────────────────────────────────────────────
 
     def health(self) -> dict:
-        """Check backend connectivity. Returns server status dict."""
-        try:
-            resp = self._session.get(f"{self.base_url}/api/health", timeout=10)
-        except requests.exceptions.ConnectionError:
-            raise ServerUnavailableError(
-                f"Cannot reach SNAQCS server at {self.base_url}. "
-                "Check SNAQCS_API_URL or start the local dev server."
-            )
+        """Check backend connectivity. Returns server status dict.
+
+        Public endpoint — doesn't require auth, so 401 translation is skipped.
+        """
+        resp = self._transport.send(
+            "GET", "/api/health", timeout=10, translate_auth_errors=False
+        )
         resp.raise_for_status()
         return resp.json()
 
@@ -616,37 +652,7 @@ class Circuits:
 
     def __init__(self, client: "SnaqcsClient") -> None:
         self._client = client
-
-    def _get(self, path: str, params: Optional[dict] = None) -> Any:
-        resp = self._client._session.get(
-            f"{self._client.base_url}{path}", params=params, timeout=30
-        )
-        if resp.status_code == 401:
-            raise AuthenticationError(
-                "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
-            )
-        resp.raise_for_status()
-        return resp.json()
-
-    def _get_raw(self, path: str) -> Any:
-        resp = self._client._session.get(
-            f"{self._client.base_url}{path}", timeout=30
-        )
-        if resp.status_code == 401:
-            raise AuthenticationError(
-                "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
-            )
-        return resp
-
-    def _delete(self, path: str) -> None:
-        resp = self._client._session.delete(
-            f"{self._client.base_url}{path}", timeout=30
-        )
-        if resp.status_code == 401:
-            raise AuthenticationError(
-                "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
-            )
-        resp.raise_for_status()
+        self._transport = client._transport
 
     def list(
         self,
@@ -659,11 +665,11 @@ class Circuits:
             params["tags"] = tags
         if search:
             params["search"] = search
-        return self._get("/api/circuits", params=params or None)
+        return self._transport.send_json("GET", "/api/circuits", params=params or None, timeout=30)
 
     def get(self, name: str) -> Optional[dict]:
         """Get a circuit by name. Returns ``None`` if not found."""
-        resp = self._get_raw(f"/api/circuits/{name}")
+        resp = self._transport.send("GET", f"/api/circuits/{name}", timeout=30)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -675,11 +681,12 @@ class Circuits:
 
     def delete(self, name: str) -> None:
         """Delete a circuit from the library by name."""
-        self._delete(f"/api/circuits/{name}")
+        resp = self._transport.send("DELETE", f"/api/circuits/{name}", timeout=30)
+        resp.raise_for_status()
 
     def export_qasm(self, name: str) -> str:
         """Export a circuit as an OpenQASM string."""
-        resp = self._get_raw(f"/api/circuits/{name}/export/qasm")
+        resp = self._transport.send("GET", f"/api/circuits/{name}/export/qasm", timeout=30)
         resp.raise_for_status()
         return resp.text
 
@@ -721,6 +728,7 @@ class SamplerJob:
 
     def __init__(self, client: "SnaqcsClient", snapshot: dict) -> None:
         self._client = client
+        self._transport = client._transport
         self._snap = snapshot
 
     @property
@@ -772,39 +780,16 @@ class SamplerJob:
         return self
 
     def stream(self, timeout: Optional[float] = None) -> Iterator[dict]:
-        """Yield progress snapshots via SSE, updating ``self`` as they arrive.
-
-        ``timeout`` is a total wall-clock budget for the whole call — the
-        same semantics as ``wait()``'s ``timeout`` — not a per-request
-        socket timeout. It's enforced both while the SSE connection is open
-        and after falling back to polling, so a caller who passes
-        ``timeout=120`` gets ``TimeoutError`` around 120s of real time
-        either way. Pass ``None`` (default) to run until the job reaches a
-        terminal state, however long that takes.
-
-        Falls back to polling (2s) when the SSE connection can't be opened
-        or drops mid-stream — e.g. behind a reverse proxy not yet
-        configured for long-lived streaming responses. A 401 is never
-        treated as a transient drop: it's checked explicitly and raises
-        ``AuthenticationError`` immediately, matching every other method on
-        this client. Likewise, the backend's ``{"error": "not_found"}``
-        sentinel (emitted once when the job is soft-deleted mid-stream)
-        raises ``JobError`` instead of silently becoming ``self._snap``'s
-        new shape and breaking ``.status``/``.id`` on the next access.
-        """
+        """Yield progress snapshots via SSE, updating ``self`` as they arrive."""
         deadline = None if timeout is None else time.monotonic() + timeout
 
         def _check_deadline():
             if deadline is not None and time.monotonic() > deadline:
                 raise TimeoutError(f"Job {self.id} did not finish within {timeout}s")
 
-        url = f"{self._client.base_url}/api/sampler/jobs/{self.id}/stream"
+        path = f"/api/sampler/jobs/{self.id}/stream"
         try:
-            with self._client._session.get(url, stream=True, timeout=timeout) as resp:
-                if resp.status_code == 401:
-                    raise AuthenticationError(
-                        "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
-                    )
+            with self._transport.send("GET", path, stream=True, timeout=timeout) as resp:
                 resp.raise_for_status()
                 for line in resp.iter_lines(decode_unicode=True):
                     _check_deadline()
@@ -817,7 +802,12 @@ class SamplerJob:
                     yield snap
                     if snap.get("status") in _TERMINAL_JOB_STATUSES:
                         return
-        except requests.RequestException:
+        # ServerUnavailableError: the initial connect dropped (translated by
+        # _Transport.send()). requests.exceptions.ConnectionError: a drop
+        # mid-stream, inside iter_lines() — after send() already returned,
+        # so _Transport never gets a chance to translate it. See
+        # docs/adr/0001-sampler-job-stream-error-translation.md.
+        except (ServerUnavailableError, requests.exceptions.ConnectionError):
             while True:
                 _check_deadline()
                 self.refresh()
@@ -835,13 +825,7 @@ class SamplerJob:
 
     def delete(self) -> None:
         """Soft-delete the job."""
-        resp = self._client._session.delete(
-            f"{self._client.base_url}/api/sampler/jobs/{self.id}", timeout=30
-        )
-        if resp.status_code == 401:
-            raise AuthenticationError(
-                "Authentication failed. Pass api_key= or set SNAQCS_API_KEY env var."
-            )
+        resp = self._transport.send("DELETE", f"/api/sampler/jobs/{self.id}", timeout=30)
         resp.raise_for_status()
 
     def __repr__(self) -> str:
@@ -890,6 +874,19 @@ class Jobs:
         data = self._client._post(
             "/api/sampler/jobs",
             {"kind": "circuit_direct_sampler", "request": request},
+        )
+        return self.get(data["job_id"])
+
+    def submit_subset_sampler(self, request: dict) -> SamplerJob:
+        """Submit a SUSA (DSS) weight-stratified sampling job over a protocol graph.
+
+        ``request`` is the same shape ``sample_protocol_subset()`` posts to
+        ``/api/protocol/subset_sampler`` — ``{"config": ..., "noise_config":
+        ..., "num_samples": ..., "seed": ..., "susa_config": {...}}``.
+        ``susa_config`` requires at minimum ``max_weight`` and ``shots_per_task``.
+        """
+        data = self._client._post(
+            "/api/sampler/jobs", {"kind": "subset_sampler", "request": request}
         )
         return self.get(data["job_id"])
 
