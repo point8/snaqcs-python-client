@@ -79,7 +79,9 @@ def test_explicit_key_overrides_env(monkeypatch):
 
 def test_reads_base_url_from_env(monkeypatch):
     monkeypatch.setenv("SNAQCS_API_URL", "https://snaqcs.point8.cloud")
-    monkeypatch.delenv("SNAQCS_API_KEY", raising=False)
+    # A remote base URL without a key would fail fast in the constructor,
+    # so provide one — the assertion is about the URL, not auth.
+    monkeypatch.setenv("SNAQCS_API_KEY", "snaqcs_x")
     c = SnaqcsClient()
     assert c.base_url == "https://snaqcs.point8.cloud"
 
@@ -465,6 +467,26 @@ def test_sampler_job_result_returns_result_dict_when_completed():
     c = SnaqcsClient(api_key="snaqcs_x")
     job = SamplerJob(c, _job_snapshot(status="completed", result={"num_samples": 10}))
     assert job.result == {"num_samples": 10}
+
+
+def test_sampler_job_timestamps_parse_to_datetime():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    job = SamplerJob(c, _job_snapshot(
+        status="completed",
+        submitted_at="2026-07-16T08:00:00+00:00",
+        started_at="2026-07-16T08:00:01+00:00",
+        finished_at="2026-07-16T08:09:21+00:00",
+    ))
+    assert (job.finished_at - job.started_at).total_seconds() == 560.0
+    assert job.submitted_at.year == 2026
+
+
+def test_sampler_job_timestamps_none_when_absent():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    job = SamplerJob(c, _job_snapshot(status="queued"))
+    assert job.submitted_at is None
+    assert job.started_at is None
+    assert job.finished_at is None
 
 
 def test_sampler_job_refresh_refetches_snapshot():

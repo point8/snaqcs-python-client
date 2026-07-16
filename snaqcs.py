@@ -5,6 +5,7 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Dict, Iterator, Optional
 
 import requests
@@ -754,6 +755,22 @@ class SamplerJob:
     @property
     def error(self) -> Optional[dict]:
         return self._snap.get("error")
+
+    @property
+    def submitted_at(self) -> Optional[datetime]:
+        return self._parse_ts("submitted_at")
+
+    @property
+    def started_at(self) -> Optional[datetime]:
+        return self._parse_ts("started_at")
+
+    @property
+    def finished_at(self) -> Optional[datetime]:
+        return self._parse_ts("finished_at")
+
+    def _parse_ts(self, field: str) -> Optional[datetime]:
+        raw = self._snap.get(field)
+        return datetime.fromisoformat(raw) if raw else None
 
     def refresh(self) -> "SamplerJob":
         """Re-fetch the current snapshot from the server."""
