@@ -768,6 +768,22 @@ class SamplerJob:
     def finished_at(self) -> Optional[datetime]:
         return self._parse_ts("finished_at")
 
+    @property
+    def save_checkpoint(self) -> bool:
+        return bool(self._snap.get("save_checkpoint", False))
+
+    @property
+    def resume_from_job_id(self) -> Optional[str]:
+        return self._snap.get("resume_from_job_id")
+
+    @property
+    def has_checkpoint(self) -> bool:
+        return bool(self._snap.get("has_checkpoint", False))
+
+    @property
+    def checkpoint_bytes(self) -> Optional[int]:
+        return self._snap.get("checkpoint_bytes")
+
     def _parse_ts(self, field: str) -> Optional[datetime]:
         raw = self._snap.get(field)
         return datetime.fromisoformat(raw) if raw else None
@@ -845,6 +861,40 @@ class SamplerJob:
         resp = self._transport.send("DELETE", f"/api/sampler/jobs/{self.id}", timeout=30)
         resp.raise_for_status()
 
+    def resume(self, *, save_checkpoint: Optional[bool] = None, **overrides) -> "SamplerJob":
+        """Submit a new job warm-started from this one's checkpoint.
+
+        Copies this job's original request, applies ``overrides`` (top-level
+        keys like ``num_samples``; a ``susa_config`` override is merged one
+        level into the original's). ``num_samples`` is cumulative — the new
+        value is the total budget, not additional shots.
+
+        ``save_checkpoint`` defaults to THIS job's own value (keeps a chain
+        resumable without repeating the flag); pass it explicitly to override.
+        """
+        import copy
+        request = copy.deepcopy(self._snap["request"])
+        for key, val in overrides.items():
+            if key == "susa_config" and isinstance(val, dict) and isinstance(request.get("susa_config"), dict):
+                request["susa_config"] = {**request["susa_config"], **val}
+            else:
+                request[key] = val
+        effective_save = self.save_checkpoint if save_checkpoint is None else save_checkpoint
+        return self._client.jobs.submit_subset_sampler(
+            request, save_checkpoint=effective_save, resume_from_job_id=self.id
+        )
+
+    def download_checkpoint(self) -> dict:
+        """Download + unpack this job's saved checkpoint.
+
+        Returns the checkpoint dict.
+        Raises if the job has no saved checkpoint (server returns 404).
+        """
+        import gzip
+        resp = self._transport.send("GET", f"/api/sampler/jobs/{self.id}/checkpoint", timeout=60)
+        resp.raise_for_status()
+        return json.loads(gzip.decompress(resp.content))
+
     def __repr__(self) -> str:
         return f"SamplerJob(id={self.id!r}, status={self.status!r})"
 
@@ -894,17 +944,28 @@ class Jobs:
         )
         return self.get(data["job_id"])
 
-    def submit_subset_sampler(self, request: dict) -> SamplerJob:
+    def submit_subset_sampler(
+        self,
+        request: dict,
+        *,
+        save_checkpoint: bool = False,
+        resume_from_job_id: Optional[str] = None,
+    ) -> SamplerJob:
         """Submit a SUSA (DSS) weight-stratified sampling job over a protocol graph.
 
         ``request`` is the same shape ``sample_protocol_subset()`` posts to
         ``/api/protocol/subset_sampler`` — ``{"config": ..., "noise_config":
         ..., "num_samples": ..., "seed": ..., "susa_config": {...}}``.
         ``susa_config`` requires at minimum ``max_weight`` and ``shots_per_task``.
+
+        ``save_checkpoint`` stores the final EventTree for later resume/inspection.
+        ``resume_from_job_id`` warm-starts from a prior completed+checkpointed job.
         """
-        data = self._client._post(
-            "/api/sampler/jobs", {"kind": "subset_sampler", "request": request}
-        )
+        body: dict = {"kind": "subset_sampler", "request": request,
+                      "save_checkpoint": save_checkpoint}
+        if resume_from_job_id is not None:
+            body["resume_from_job_id"] = resume_from_job_id
+        data = self._client._post("/api/sampler/jobs", body)
         return self.get(data["job_id"])
 
     def get(self, job_id: str) -> SamplerJob:

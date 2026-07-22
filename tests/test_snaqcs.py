@@ -718,6 +718,159 @@ def test_sampler_job_stream_drops_mid_stream_then_falls_back_to_polling():
     assert [e["status"] for e in events] == ["running", "completed"]
 
 
+def test_submit_subset_sampler_posts_kind_and_request_default_no_resume():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    request = {"config": {}, "num_samples": 100, "susa_config": {"max_weight": 2, "shots_per_task": 50}}
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "sub-1"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())) as mock_get:
+        job = c.jobs.submit_subset_sampler(request)
+    body = mock_post.call_args[1]["json"]
+    assert body == {"kind": "subset_sampler", "request": request, "save_checkpoint": False}
+    assert mock_get.call_args[0][0].endswith("/api/sampler/jobs/sub-1")
+    assert isinstance(job, SamplerJob)
+
+
+def test_submit_subset_sampler_passes_save_checkpoint_and_resume_from_job_id():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    request = {"config": {}, "num_samples": 100, "susa_config": {}}
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "sub-2"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())):
+        c.jobs.submit_subset_sampler(request, save_checkpoint=True, resume_from_job_id="aaaa")
+    body = mock_post.call_args[1]["json"]
+    assert body == {
+        "kind": "subset_sampler", "request": request,
+        "save_checkpoint": True, "resume_from_job_id": "aaaa",
+    }
+
+
+def test_submit_subset_sampler_omits_resume_from_job_id_when_none():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    request = {"config": {}, "num_samples": 100, "susa_config": {}}
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "sub-3"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())):
+        c.jobs.submit_subset_sampler(request)
+    assert "resume_from_job_id" not in mock_post.call_args[1]["json"]
+
+
+# ── SamplerJob checkpoint accessors, resume(), download_checkpoint() ──────────
+
+def test_sampler_job_checkpoint_accessors_read_snapshot():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    job = SamplerJob(c, _job_snapshot(
+        status="completed", save_checkpoint=True, has_checkpoint=True,
+        checkpoint_bytes=1234, resume_from_job_id="bbbb",
+    ))
+    assert job.save_checkpoint is True
+    assert job.has_checkpoint is True
+    assert job.checkpoint_bytes == 1234
+    assert job.resume_from_job_id == "bbbb"
+
+
+def test_sampler_job_checkpoint_accessors_default_when_absent():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    job = SamplerJob(c, _job_snapshot(status="queued"))
+    assert job.save_checkpoint is False
+    assert job.has_checkpoint is False
+    assert job.checkpoint_bytes is None
+    assert job.resume_from_job_id is None
+
+
+def test_resume_merges_overrides_and_defaults_save_from_source():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    snap = _job_snapshot(
+        status="completed",
+        request={"config": {}, "num_samples": 100,
+                 "susa_config": {"max_weight": 2, "shots_per_task": 50}},
+        save_checkpoint=True, has_checkpoint=True, checkpoint_bytes=1234,
+    )
+    job = SamplerJob(c, snap)
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "resumed-1"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())):
+        resumed = job.resume(num_samples=200)
+    body = mock_post.call_args[1]["json"]
+    assert body["kind"] == "subset_sampler"
+    assert body["resume_from_job_id"] == job.id
+    assert body["request"]["num_samples"] == 200
+    assert body["request"]["susa_config"]["max_weight"] == 2
+    assert body["save_checkpoint"] is True
+    assert isinstance(resumed, SamplerJob)
+    # original request must not be mutated
+    assert snap["request"]["num_samples"] == 100
+
+
+def test_resume_save_checkpoint_explicit_override():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    snap = _job_snapshot(
+        status="completed",
+        request={"config": {}, "num_samples": 100, "susa_config": {}},
+        save_checkpoint=True, has_checkpoint=True,
+    )
+    job = SamplerJob(c, snap)
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "resumed-2"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())):
+        job.resume(save_checkpoint=False)
+    assert mock_post.call_args[1]["json"]["save_checkpoint"] is False
+
+
+def test_resume_partial_susa_config_merges_one_level():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    snap = _job_snapshot(
+        status="completed",
+        request={"config": {}, "num_samples": 100,
+                 "susa_config": {"max_weight": 2, "shots_per_task": 50}},
+        save_checkpoint=False, has_checkpoint=True,
+    )
+    job = SamplerJob(c, snap)
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "resumed-3"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())):
+        job.resume(susa_config={"eta_max": 1e-4})
+    sc = mock_post.call_args[1]["json"]["request"]["susa_config"]
+    assert sc == {"max_weight": 2, "shots_per_task": 50, "eta_max": 1e-4}
+
+
+def test_download_checkpoint_returns_unpacked_dict():
+    import gzip
+    import json as jsonlib
+    c = SnaqcsClient(api_key="snaqcs_x")
+    cp = {"format_version": 1, "n_shots": 100, "tree": {"n_parts": 1, "root": 0}}
+    blob = gzip.compress(jsonlib.dumps(cp).encode("utf-8"))
+    job = SamplerJob(c, _job_snapshot(status="completed", has_checkpoint=True))
+    mock_resp = MagicMock()
+    mock_resp.content = blob
+    mock_resp.raise_for_status = MagicMock()
+    with patch.object(c._transport._session, "get", return_value=mock_resp) as mock_get:
+        got = job.download_checkpoint()
+    assert got == cp
+    assert mock_get.call_args[0][0].endswith(f"/api/sampler/jobs/{job.id}/checkpoint")
+
+
+def test_download_checkpoint_roundtrips_through_tree_io():
+    # snaqcs_susa (the backend/susa extension) is not a dependency of this
+    # client repo — skip the tree_io round-trip if it isn't installed in
+    # the test env, without hard-requiring it.
+    pytest.importorskip("snaqcs_susa")
+    import gzip
+    import json as jsonlib
+    import snaqcs_susa.tree_io as tio
+
+    c = SnaqcsClient(api_key="snaqcs_x")
+    cp = {"format_version": 1, "n_shots": 100,
+          "tree": {"n_parts": 1, "root": 0, "c_proto_node": [0], "c_n": [0],
+                   "c_residual_t": [0], "c_invariant": [0], "c_child_offset": [0, 0],
+                   "c_child_w": [], "c_child_id": [], "w_w": [], "w_n": [],
+                   "w_n_fail": [], "w_n_success": [], "w_n_trunc": [],
+                   "w_child_offset": [], "w_child_proto": [], "w_child_id": []}}
+    blob = gzip.compress(jsonlib.dumps(cp).encode("utf-8"))
+    job = SamplerJob(c, _job_snapshot(status="completed", has_checkpoint=True))
+    mock_resp = MagicMock()
+    mock_resp.content = blob
+    mock_resp.raise_for_status = MagicMock()
+    with patch.object(c._transport._session, "get", return_value=mock_resp):
+        got = job.download_checkpoint()
+    assert got == cp
+    tio.to_networkx(got)  # must not raise
+
+
 def test_sampler_job_stream_enforces_overall_timeout_across_sse_and_polling():
     """timeout is a total wall-clock budget (matching wait()), not a
     per-request socket timeout — it must fire even after the fallback to
