@@ -379,7 +379,7 @@ def test_enumerate_single_faults_alias_posts_to_correct_url():
 def _job_snapshot(status="queued", **overrides):
     snap = {
         "id": "11111111-1111-1111-1111-111111111111",
-        "kind": "direct_sampler",
+        "kind": "protocol_direct_sampler",
         "status": status,
         "request": {},
         "result": None,
@@ -400,16 +400,16 @@ def test_jobs_property_is_cached():
     assert c.jobs is c.jobs
 
 
-def test_submit_direct_sampler_posts_kind_and_request_then_fetches_snapshot():
-    # kind="direct_sampler" jobs wrap a protocol-graph request (the same
+def test_submit_protocol_direct_sampler_posts_kind_and_request_then_fetches_snapshot():
+    # kind="protocol_direct_sampler" jobs wrap a protocol-graph request (the same
     # shape sample_protocol() posts to /api/protocol/direct_sampler), not
     # the single-circuit sample() shape.
     c = SnaqcsClient(api_key="snaqcs_x")
     request = {"config": {"circuits": {}, "edges": []}, "num_samples": 20}
     with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "abc-123"})) as mock_post, \
          patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())) as mock_get:
-        job = c.jobs.submit_direct_sampler(request)
-    assert mock_post.call_args[1]["json"] == {"kind": "direct_sampler", "request": request}
+        job = c.jobs.submit_protocol_direct_sampler(request)
+    assert mock_post.call_args[1]["json"] == {"kind": "protocol_direct_sampler", "request": request}
     assert mock_get.call_args[0][0].endswith("/api/sampler/jobs/abc-123")
     assert isinstance(job, SamplerJob)
     assert job.status == "queued"
@@ -417,7 +417,7 @@ def test_submit_direct_sampler_posts_kind_and_request_then_fetches_snapshot():
 
 def test_submit_circuit_direct_sampler_posts_kind_and_request():
     # kind="circuit_direct_sampler" wraps the same shape sample() posts to
-    # /api/direct_sampler — circuit + check_functions, optionally
+    # /api/circuit/direct_sampler — circuit + check_functions, optionally
     # decoder_backend/decoder_config.
     c = SnaqcsClient(api_key="snaqcs_x")
     request = {
@@ -446,9 +446,9 @@ def test_jobs_list_builds_query_params():
     c = SnaqcsClient(api_key="snaqcs_x")
     payload = {"items": [_job_snapshot(), _job_snapshot()], "limit": 50, "offset": 0}
     with patch.object(c._transport._session, "get", return_value=_mock_resp(payload)) as mock_get:
-        jobs = c.jobs.list(status="queued", kind="direct_sampler", limit=10, offset=5)
+        jobs = c.jobs.list(status="queued", kind="protocol_direct_sampler", limit=10, offset=5)
     assert mock_get.call_args[1]["params"] == {
-        "limit": 10, "offset": 5, "status": "queued", "kind": "direct_sampler",
+        "limit": 10, "offset": 5, "status": "queued", "kind": "protocol_direct_sampler",
     }
     assert len(jobs) == 2
     assert all(isinstance(j, SamplerJob) for j in jobs)
@@ -718,37 +718,37 @@ def test_sampler_job_stream_drops_mid_stream_then_falls_back_to_polling():
     assert [e["status"] for e in events] == ["running", "completed"]
 
 
-def test_submit_subset_sampler_posts_kind_and_request_default_no_resume():
+def test_submit_protocol_subset_sampler_posts_kind_and_request_default_no_resume():
     c = SnaqcsClient(api_key="snaqcs_x")
     request = {"config": {}, "num_samples": 100, "susa_config": {"max_weight": 2, "shots_per_task": 50}}
     with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "sub-1"})) as mock_post, \
          patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())) as mock_get:
-        job = c.jobs.submit_subset_sampler(request)
+        job = c.jobs.submit_protocol_subset_sampler(request)
     body = mock_post.call_args[1]["json"]
-    assert body == {"kind": "subset_sampler", "request": request, "save_checkpoint": False}
+    assert body == {"kind": "protocol_subset_sampler", "request": request, "save_checkpoint": False}
     assert mock_get.call_args[0][0].endswith("/api/sampler/jobs/sub-1")
     assert isinstance(job, SamplerJob)
 
 
-def test_submit_subset_sampler_passes_save_checkpoint_and_resume_from_job_id():
+def test_submit_protocol_subset_sampler_passes_save_checkpoint_and_resume_from_job_id():
     c = SnaqcsClient(api_key="snaqcs_x")
     request = {"config": {}, "num_samples": 100, "susa_config": {}}
     with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "sub-2"})) as mock_post, \
          patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())):
-        c.jobs.submit_subset_sampler(request, save_checkpoint=True, resume_from_job_id="aaaa")
+        c.jobs.submit_protocol_subset_sampler(request, save_checkpoint=True, resume_from_job_id="aaaa")
     body = mock_post.call_args[1]["json"]
     assert body == {
-        "kind": "subset_sampler", "request": request,
+        "kind": "protocol_subset_sampler", "request": request,
         "save_checkpoint": True, "resume_from_job_id": "aaaa",
     }
 
 
-def test_submit_subset_sampler_omits_resume_from_job_id_when_none():
+def test_submit_protocol_subset_sampler_omits_resume_from_job_id_when_none():
     c = SnaqcsClient(api_key="snaqcs_x")
     request = {"config": {}, "num_samples": 100, "susa_config": {}}
     with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "sub-3"})) as mock_post, \
          patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())):
-        c.jobs.submit_subset_sampler(request)
+        c.jobs.submit_protocol_subset_sampler(request)
     assert "resume_from_job_id" not in mock_post.call_args[1]["json"]
 
 
@@ -788,7 +788,7 @@ def test_resume_merges_overrides_and_defaults_save_from_source():
          patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())):
         resumed = job.resume(num_samples=200)
     body = mock_post.call_args[1]["json"]
-    assert body["kind"] == "subset_sampler"
+    assert body["kind"] == "protocol_subset_sampler"
     assert body["resume_from_job_id"] == job.id
     assert body["request"]["num_samples"] == 200
     assert body["request"]["susa_config"]["max_weight"] == 2

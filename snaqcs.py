@@ -459,7 +459,7 @@ class SnaqcsClient:
             body["decoder_backend"] = decoder_backend
         if decoder_config is not None:
             body["decoder_config"] = decoder_config
-        return self._post("/api/direct_sampler", body)
+        return self._post("/api/circuit/direct_sampler", body)
 
     def sample_protocol(
         self,
@@ -612,7 +612,7 @@ class SnaqcsClient:
 
     @property
     def jobs(self) -> "Jobs":
-        """Sub-client for background sampler jobs (``client.jobs.submit_direct_sampler(...)``, etc.)."""
+        """Sub-client for background sampler jobs (``client.jobs.submit_protocol_direct_sampler(...)``, etc.)."""
         if not hasattr(self, "_jobs"):
             self._jobs = Jobs(self)
         return self._jobs
@@ -710,7 +710,7 @@ class SamplerJob:
     """
     Handle for an async sampler job.
 
-    Created by ``client.jobs.submit_direct_sampler(...)`` or
+    Created by ``client.jobs.submit_protocol_direct_sampler(...)`` or
     ``client.jobs.get(id)``. Holds a snapshot plus a reference to the
     client, the same shape as ``Decoder`` — submit returns immediately,
     ``.wait()`` blocks until terminal, ``.stream()`` yields progress,
@@ -718,7 +718,7 @@ class SamplerJob:
 
     Example::
 
-        job = client.jobs.submit_direct_sampler({
+        job = client.jobs.submit_protocol_direct_sampler({
             "circuit": {...},
             "check_functions": {"anyError": "weight > 0"},
             "num_samples": 10_000,
@@ -880,7 +880,7 @@ class SamplerJob:
             else:
                 request[key] = val
         effective_save = self.save_checkpoint if save_checkpoint is None else save_checkpoint
-        return self._client.jobs.submit_subset_sampler(
+        return self._client.jobs.submit_protocol_subset_sampler(
             request, save_checkpoint=effective_save, resume_from_job_id=self.id
         )
 
@@ -905,7 +905,7 @@ class Jobs:
 
     Example::
 
-        job = client.jobs.submit_direct_sampler({...})
+        job = client.jobs.submit_protocol_direct_sampler({...})
         job.wait()
         for j in client.jobs.list(status="running"):
             print(j.id, j.progress)
@@ -914,17 +914,15 @@ class Jobs:
     def __init__(self, client: "SnaqcsClient") -> None:
         self._client = client
 
-    def submit_direct_sampler(self, request: dict) -> SamplerJob:
+    def submit_protocol_direct_sampler(self, request: dict) -> SamplerJob:
         """Submit a direct-sampler job over a protocol graph.
 
         ``request`` is the same shape ``sample_protocol()`` posts to
         ``/api/protocol/direct_sampler`` — ``{"config": ..., "noise_config":
-        ..., "num_samples": ..., "seed": ..., "backend": ...}``. This is the
-        protocol-graph sampler; for a single circuit see
-        ``submit_circuit_direct_sampler`` instead.
+        ..., "num_samples": ..., "seed": ..., "backend": ...}``.
         """
         data = self._client._post(
-            "/api/sampler/jobs", {"kind": "direct_sampler", "request": request}
+            "/api/sampler/jobs", {"kind": "protocol_direct_sampler", "request": request}
         )
         return self.get(data["job_id"])
 
@@ -932,7 +930,7 @@ class Jobs:
         """Submit a single-circuit direct-sampler job.
 
         ``request`` is the same shape ``sample()`` posts to
-        ``/api/direct_sampler`` — ``circuit``, ``check_functions``,
+        ``/api/circuit/direct_sampler`` — ``circuit``, ``check_functions``,
         ``noise_config``, ``num_samples``, ``seed``, ``propagation_backend``,
         ``decoder_backend``/``decoder_config``, etc. (see
         ``SnaqcsClient.sample``'s docstring). Progress streams the same way
@@ -944,7 +942,7 @@ class Jobs:
         )
         return self.get(data["job_id"])
 
-    def submit_subset_sampler(
+    def submit_protocol_subset_sampler(
         self,
         request: dict,
         *,
@@ -961,7 +959,7 @@ class Jobs:
         ``save_checkpoint`` stores the final EventTree for later resume/inspection.
         ``resume_from_job_id`` warm-starts from a prior completed+checkpointed job.
         """
-        body: dict = {"kind": "subset_sampler", "request": request,
+        body: dict = {"kind": "protocol_subset_sampler", "request": request,
                       "save_checkpoint": save_checkpoint}
         if resume_from_job_id is not None:
             body["resume_from_job_id"] = resume_from_job_id

@@ -46,7 +46,7 @@ def main():
     print(f"Connected to {client.base_url}\n")
 
     print("Submitting SUSA (DSS) job...")
-    susa_job = client.jobs.submit_subset_sampler({
+    susa_job = client.jobs.submit_protocol_subset_sampler({
         "config": PROTOCOL_CONFIG,
         "noise_config": NOISE_CONFIG,
         "num_samples": 5_000,
@@ -63,7 +63,7 @@ def main():
     }).wait(timeout=60.0, poll=1.0)
 
     print("Submitting DirectSampler job...")
-    direct_job = client.jobs.submit_direct_sampler({
+    direct_job = client.jobs.submit_protocol_direct_sampler({
         "config": PROTOCOL_CONFIG,
         "noise_config": NOISE_CONFIG,
         "num_samples": 50_000,
