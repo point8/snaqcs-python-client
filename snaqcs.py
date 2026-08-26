@@ -469,8 +469,16 @@ class SnaqcsClient:
         seed: Optional[int] = None,
         backend: Optional[str] = None,
         workers: Optional[int] = None,
+        capture_failures: bool = False,
+        capture_cap: Optional[int] = None,
     ) -> dict:
         """Monte Carlo fault sampling for a multi-circuit protocol.
+
+        ``capture_failures`` records the faults and per-visit outcomes of failing
+        shots as ``failure_records``, each replayable via :meth:`replay`. Off by
+        default because it costs work on every shot. ``capture_cap`` bounds how
+        many are kept (lowest-weight first); the rest come back counted as
+        ``failure_records_dropped``.
         """
         body = {
             "config": config,
@@ -482,6 +490,10 @@ class SnaqcsClient:
             body["backend"] = backend
         if workers is not None:
             body["workers"] = workers
+        if capture_failures:
+            body["capture_failures"] = True
+        if capture_cap is not None:
+            body["capture_cap"] = capture_cap
         return self._post("/api/protocol/direct_sampler", body)
 
     def sample_protocol_subset(
@@ -492,6 +504,8 @@ class SnaqcsClient:
         susa_config: dict,
         num_samples: int = 100_000,
         seed: int | None = None,
+        capture_failures: bool = False,
+        capture_cap: Optional[int] = None,
     ) -> dict:
         """POST /api/protocol/subset_sampler — SUSA weight-stratified DSS sampling.
 
@@ -499,14 +513,24 @@ class SnaqcsClient:
                           n_max (int, optional), backend (str, optional).
         Returns a superset of the direct_sampler response with extra DSS fields:
         p_logical, p_lower, p_upper, sigma_L, sigma_U, delta, eta.
+
+        ``capture_failures`` returns ``failure_records`` for replay, each carrying
+        its ``p_lower_contribution`` — this failure's share of the DSS lower bound,
+        which is what a failing-shot list wants to be ranked by. Retention here is
+        first-N-in-shot-order inside the engine, not lowest-weight-N.
         """
-        return self._post("/api/protocol/subset_sampler", {
+        body = {
             "config": config,
             "noise_config": noise_config,
             "num_samples": num_samples,
             "seed": seed,
             "susa_config": susa_config,
-        })
+        }
+        if capture_failures:
+            body["capture_failures"] = True
+        if capture_cap is not None:
+            body["capture_cap"] = capture_cap
+        return self._post("/api/protocol/subset_sampler", body)
 
     # ── Fault analysis ────────────────────────────────────────────────────────
 
@@ -587,6 +611,56 @@ class SnaqcsClient:
             "config": config,
             "faults": faults,
         })
+
+    def replayability(
+        self,
+        config: dict,
+        check_functions: Optional[Dict[str, str]] = None,
+    ) -> dict:
+        """Can this protocol's captured shots be replayed, and which readouts are gauge-dependent.
+
+        Returns ``{"replayable": bool, "reason": str|None,
+        "gauge_dependent_nodes": [...], "paths_probed": int}``.
+
+        ``replayable: False`` is an answer, not an error: an edge predicate reads a
+        raw projective outcome, so no fault list reproduces the branch it took.
+        ``paths_probed`` is load-bearing — a fault set only probes the branches it
+        reaches, so the claim is "no divergence observed on the paths probed",
+        never a proof. A replayable protocol can still have gauge-dependent nodes,
+        whose readouts are one representative of a logical class rather than the
+        observed value.
+        """
+        body: dict = {"config": config}
+        if check_functions is not None:
+            body["check_functions"] = check_functions
+        return self._post("/api/protocol/replayability", body)
+
+    def replay(
+        self,
+        config: dict,
+        record: dict,
+        ignore_config_drift: bool = False,
+    ) -> dict:
+        """Replay one captured failing shot and return its per-visit trace.
+
+        ``record`` is an element of a sampler's ``failure_records``. The record's
+        faults drive the walk and its outcomes are pinned, so the walk follows the
+        shot rather than re-deriving a branch; the verdict is echoed from the
+        record, never recomputed. Returns ``trace``, ``verdict_recorded``,
+        ``verdict_source``, ``record_reached_fail``, ``terminal_state_matches``,
+        ``outcome_mismatch_visits`` and ``config_drift``.
+
+        Predicates are compiled from ``config["check_functions"]`` as strings — a
+        record captured in-process with live callables cannot be replayed here.
+        A record captured against a different resolved config is a 409; pass
+        ``ignore_config_drift=True`` only when the difference is cosmetic.
+        ``outcome_mismatch_visits`` is expected to be non-empty for a
+        tableau-sourced record: that is the caveat, not a failure.
+        """
+        body = {"config": config, "record": record}
+        if ignore_config_drift:
+            body["ignore_config_drift"] = True
+        return self._post("/api/protocol/replay", body)
 
     # ── Noise ─────────────────────────────────────────────────────────────────
 
