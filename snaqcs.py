@@ -439,7 +439,6 @@ class SnaqcsClient:
         num_samples: int = 1000,
         seed: Optional[int] = None,
         return_sample_details: bool = False,
-        propagation_backend: Optional[str] = None,
         decoder_backend: Optional[str] = None,
         decoder_config: Optional[dict] = None,
     ) -> dict:
@@ -453,8 +452,6 @@ class SnaqcsClient:
             "seed": seed,
             "return_sample_details": return_sample_details,
         }
-        if propagation_backend is not None:
-            body["propagation_backend"] = propagation_backend
         if decoder_backend is not None:
             body["decoder_backend"] = decoder_backend
         if decoder_config is not None:
@@ -1005,7 +1002,7 @@ class Jobs:
 
         ``request`` is the same shape ``sample()`` posts to
         ``/api/circuit/direct_sampler`` — ``circuit``, ``check_functions``,
-        ``noise_config``, ``num_samples``, ``seed``, ``propagation_backend``,
+        ``noise_config``, ``num_samples``, ``seed``,
         ``decoder_backend``/``decoder_config``, etc. (see
         ``SnaqcsClient.sample``'s docstring). Progress streams the same way
         as any other job — ``job.wait()`` or ``job.stream()``.

@@ -235,12 +235,10 @@ def test_sample_passes_decoder_fields_when_set():
         c.sample(
             circuit={"qubits": 3, "layers": []},
             check_functions={"a": "weight > 0"},
-            propagation_backend="numpy",
             decoder_backend="numpy",
             decoder_config=decoder_config,
         )
     body = mock_post.call_args[1]["json"]
-    assert body["propagation_backend"] == "numpy"
     assert body["decoder_backend"] == "numpy"
     assert body["decoder_config"] == decoder_config
 
