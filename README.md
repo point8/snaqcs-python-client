@@ -13,6 +13,12 @@ cd snaqcs-python-client
 uv run example_fault_analysis.py
 ```
 
+## Server compatibility
+
+0.3.0 and later talk to the versioned `/api/v1` server API and need a snaQCs
+server from the 2026-10-06 URL rename onwards. Older servers (unversioned
+`/api/...` paths) need client 0.2.x; there is no version that works with both.
+
 ## Auth
 
 The client requires an API key to connect to the snaQCs server:

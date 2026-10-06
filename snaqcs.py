@@ -323,7 +323,7 @@ class SnaqcsClient:
         logical_z: Optional[str] = None,
     ) -> DecoderResult:
         """Decode a single Pauli error."""
-        data = self._post("/api/decode", {
+        data = self._post("/api/v1/decoder/decode", {
             "error": error,
             "stabilizers": stabilizers,
             "num_qubits": num_qubits,
@@ -341,7 +341,7 @@ class SnaqcsClient:
         logical_z: Optional[str] = None,
     ) -> list:
         """Decode multiple Pauli errors in a single API call."""
-        data = self._post("/api/decode/batch", {
+        data = self._post("/api/v1/decoder/decode_batch", {
             "errors": errors,
             "stabilizers": stabilizers,
             "num_qubits": num_qubits,
@@ -357,7 +357,7 @@ class SnaqcsClient:
         logical_x: Optional[str] = None,
         logical_z: Optional[str] = None,
     ) -> LookupTableInfo:
-        data = self._post("/api/decode/info", {
+        data = self._post("/api/v1/decoder/info", {
             "stabilizers": stabilizers,
             "num_qubits": num_qubits,
             "logical_x": logical_x,
@@ -392,7 +392,7 @@ class SnaqcsClient:
         ``faults`` is a list of ``{"location": N, "qubit": Q, "pauli": "X"}`` dicts.
         ``location=N`` means the error appears after gate N; ``location=-1`` is a prep fault.
         """
-        data = self._post("/api/propagate", {
+        data = self._post("/api/v1/analysis/circuit/propagate", {
             "circuit": circuit,
             "faults": faults,
         })
@@ -428,7 +428,7 @@ class SnaqcsClient:
             body["fault_types"] = fault_types
         if sample_size is not None:
             body["sample_size"] = sample_size
-        return self._post("/api/enumerate_faults", body)
+        return self._post("/api/v1/analysis/circuit/enumerate_faults", body)
 
     # ── Sampling ──────────────────────────────────────────────────────────────
 
@@ -457,7 +457,7 @@ class SnaqcsClient:
             body["decoder_backend"] = decoder_backend
         if decoder_config is not None:
             body["decoder_config"] = decoder_config
-        return self._post("/api/circuit/direct_sampler", body)
+        return self._post("/api/v1/sampling/circuit/direct", body)
 
     def sample_protocol(
         self,
@@ -492,7 +492,7 @@ class SnaqcsClient:
             body["capture_failures"] = True
         if capture_cap is not None:
             body["capture_cap"] = capture_cap
-        return self._post("/api/protocol/direct_sampler", body)
+        return self._post("/api/v1/sampling/protocol/direct", body)
 
     def sample_protocol_subset(
         self,
@@ -505,7 +505,7 @@ class SnaqcsClient:
         capture_failures: bool = False,
         capture_cap: Optional[int] = None,
     ) -> dict:
-        """POST /api/protocol/subset_sampler — SUSA weight-stratified DSS sampling.
+        """POST /api/v1/sampling/protocol/subset — SUSA weight-stratified DSS sampling.
 
         susa_config keys: max_weight (int), shots_per_task (int), eta_max (float),
                           n_max (int, optional), backend (str, optional).
@@ -528,7 +528,7 @@ class SnaqcsClient:
             body["capture_failures"] = True
         if capture_cap is not None:
             body["capture_cap"] = capture_cap
-        return self._post("/api/protocol/subset_sampler", body)
+        return self._post("/api/v1/sampling/protocol/subset", body)
 
     # ── Fault analysis ────────────────────────────────────────────────────────
 
@@ -543,7 +543,7 @@ class SnaqcsClient:
         ``error`` is ``{"x_errors": [qubit_indices], "z_errors": [qubit_indices]}``.
         ``code_config`` is a CSSCodeConfig dict with ``x_stabilizers``, ``z_stabilizers`` etc.
         """
-        return self._post("/api/syndrome", {"error": error, "code": code_config})
+        return self._post("/api/v1/decoder/syndrome", {"error": error, "code": code_config})
 
     def propagate_multiple(
         self,
@@ -553,7 +553,7 @@ class SnaqcsClient:
         return_intermediate: bool = False,
     ) -> dict:
         """Propagate multiple simultaneous faults and evaluate check_functions."""
-        return self._post("/api/multiple_faults", {
+        return self._post("/api/v1/analysis/circuit/propagate_multi", {
             "circuit": circuit,
             "faults": faults,
             "classic_functions": check_functions,
@@ -569,7 +569,7 @@ class SnaqcsClient:
     ) -> dict:
         """Enumerate every single-qubit Pauli error in the circuit.
         """
-        return self._post("/api/enumerate_pauli_faults", {
+        return self._post("/api/v1/analysis/circuit/enumerate_pauli_faults", {
             "circuit": circuit,
             "code_config": code_config,
             "fault_types": fault_types or ["X", "Y", "Z"],
@@ -591,7 +591,7 @@ class SnaqcsClient:
         ``ci_z``: 1.0 = 1σ/68%, 1.96 = 95%, 2.0 = 2σ, 3.0 = 3σ, 5.0 = 5σ.
         Returns ``{"ci_lower": float, "ci_upper": float, "ci_z": float, "proportion": float}``.
         """
-        return self._post("/api/wilson_ci", {
+        return self._post("/api/v1/analysis/wilson_ci", {
             "num_success": num_success,
             "num_total": num_total,
             "ci_z": ci_z,
@@ -605,7 +605,7 @@ class SnaqcsClient:
         faults: list,
     ) -> dict:
         """Propagate a specific fault scenario through a multi-circuit protocol."""
-        return self._post("/api/protocol/propagate", {
+        return self._post("/api/v1/analysis/protocol/propagate", {
             "config": config,
             "faults": faults,
         })
@@ -631,7 +631,7 @@ class SnaqcsClient:
         body: dict = {"config": config}
         if check_functions is not None:
             body["classic_functions"] = check_functions
-        return self._post("/api/protocol/replayability", body)
+        return self._post("/api/v1/analysis/protocol/replayability", body)
 
     def replay(
         self,
@@ -658,7 +658,7 @@ class SnaqcsClient:
         body = {"config": config, "record": record}
         if ignore_config_drift:
             body["ignore_config_drift"] = True
-        return self._post("/api/protocol/replay", body)
+        return self._post("/api/v1/analysis/protocol/replay", body)
 
     # ── Noise ─────────────────────────────────────────────────────────────────
 
@@ -669,7 +669,7 @@ class SnaqcsClient:
         Returns ``{"depolarizing_config": {...}, "correlated_config": ...}``.
         Raises HTTP 422 if the profile is malformed.
         """
-        return self._post("/api/noise/profile/validate", profile)
+        return self._post("/api/v1/noise_models/profile/validate", profile)
 
     # ── Circuit library ───────────────────────────────────────────────────────
 
@@ -697,7 +697,7 @@ class SnaqcsClient:
         Public endpoint — doesn't require auth, so 401 translation is skipped.
         """
         resp = self._transport.send(
-            "GET", "/api/health", timeout=10, translate_auth_errors=False
+            "GET", "/api/v1/health", timeout=10, translate_auth_errors=False
         )
         resp.raise_for_status()
         return resp.json()
@@ -738,11 +738,11 @@ class Circuits:
             params["tags"] = tags
         if search:
             params["search"] = search
-        return self._transport.send_json("GET", "/api/circuits", params=params or None, timeout=30)
+        return self._transport.send_json("GET", "/api/v1/circuits", params=params or None, timeout=30)
 
     def get(self, name: str) -> Optional[dict]:
         """Get a circuit by name. Returns ``None`` if not found."""
-        resp = self._transport.send("GET", f"/api/circuits/{name}", timeout=30)
+        resp = self._transport.send("GET", f"/api/v1/circuits/{name}", timeout=30)
         if resp.status_code == 404:
             return None
         resp.raise_for_status()
@@ -750,16 +750,16 @@ class Circuits:
 
     def save(self, circuit: dict) -> dict:
         """Save a new circuit to the library. ``circuit`` must include ``"name"``."""
-        return self._client._post("/api/circuits", circuit)
+        return self._client._post("/api/v1/circuits", circuit)
 
     def delete(self, name: str) -> None:
         """Delete a circuit from the library by name."""
-        resp = self._transport.send("DELETE", f"/api/circuits/{name}", timeout=30)
+        resp = self._transport.send("DELETE", f"/api/v1/circuits/{name}", timeout=30)
         resp.raise_for_status()
 
     def export_qasm(self, name: str) -> str:
         """Export a circuit as an OpenQASM string."""
-        resp = self._transport.send("GET", f"/api/circuits/{name}/export/qasm", timeout=30)
+        resp = self._transport.send("GET", f"/api/v1/circuits/{name}/export/qasm", timeout=30)
         resp.raise_for_status()
         return resp.text
 
@@ -768,7 +768,7 @@ class Circuits:
         body: dict = {"qasm": qasm}
         if name:
             body["name"] = name
-        return self._client._post("/api/circuits/import/qasm", body)
+        return self._client._post("/api/v1/circuits/import/qasm", body)
 
 
 # ── Sampler jobs sub-client ──────────────────────────────────────────────────
@@ -862,7 +862,7 @@ class SamplerJob:
 
     def refresh(self) -> "SamplerJob":
         """Re-fetch the current snapshot from the server."""
-        self._snap = self._client._get(f"/api/sampler/jobs/{self.id}")
+        self._snap = self._client._get(f"/api/v1/sampling/jobs/{self.id}")
         return self
 
     def wait(self, timeout: Optional[float] = None, poll: float = 2.0) -> "SamplerJob":
@@ -892,7 +892,7 @@ class SamplerJob:
             if deadline is not None and time.monotonic() > deadline:
                 raise TimeoutError(f"Job {self.id} did not finish within {timeout}s")
 
-        path = f"/api/sampler/jobs/{self.id}/stream"
+        path = f"/api/v1/sampling/jobs/{self.id}/stream"
         try:
             with self._transport.send("GET", path, stream=True, timeout=timeout) as resp:
                 resp.raise_for_status()
@@ -925,12 +925,12 @@ class SamplerJob:
         """Request cancellation. Best-effort — the worker checks at the next
         progress tick, so the job may not be ``cancelled`` immediately."""
         body = {"reason": reason} if reason else {}
-        self._client._post(f"/api/sampler/jobs/{self.id}/cancel", body)
+        self._client._post(f"/api/v1/sampling/jobs/{self.id}/cancel", body)
         return self.refresh()
 
     def delete(self) -> None:
         """Soft-delete the job."""
-        resp = self._transport.send("DELETE", f"/api/sampler/jobs/{self.id}", timeout=30)
+        resp = self._transport.send("DELETE", f"/api/v1/sampling/jobs/{self.id}", timeout=30)
         resp.raise_for_status()
 
     def resume(self, *, save_checkpoint: Optional[bool] = None, **overrides) -> "SamplerJob":
@@ -963,7 +963,7 @@ class SamplerJob:
         Raises if the job has no saved checkpoint (server returns 404).
         """
         import gzip
-        resp = self._transport.send("GET", f"/api/sampler/jobs/{self.id}/checkpoint", timeout=60)
+        resp = self._transport.send("GET", f"/api/v1/sampling/jobs/{self.id}/checkpoint", timeout=60)
         resp.raise_for_status()
         return json.loads(gzip.decompress(resp.content))
 
@@ -990,11 +990,11 @@ class Jobs:
         """Submit a direct-sampler job over a protocol graph.
 
         ``request`` is the same shape ``sample_protocol()`` posts to
-        ``/api/protocol/direct_sampler`` — ``{"config": ..., "noise_config":
+        ``/api/v1/sampling/protocol/direct`` — ``{"config": ..., "noise_config":
         ..., "num_samples": ..., "seed": ..., "backend": ...}``.
         """
         data = self._client._post(
-            "/api/sampler/jobs", {"kind": "protocol_direct_sampler", "request": request}
+            "/api/v1/sampling/jobs", {"kind": "protocol_direct_sampler", "request": request}
         )
         return self.get(data["job_id"])
 
@@ -1003,10 +1003,10 @@ class Jobs:
 
         ``request`` is the same shape ``sample()`` posts to
 <<<<<<< Updated upstream
-        ``/api/circuit/direct_sampler`` — ``circuit``, ``check_functions``,
+        ``/api/v1/sampling/circuit/direct`` — ``circuit``, ``check_functions``,
         ``noise_config``, ``num_samples``, ``seed``,
 =======
-        ``/api/circuit/direct_sampler`` — ``circuit``, ``classic_functions``,
+        ``/api/v1/sampling/circuit/direct`` — ``circuit``, ``classic_functions``,
         ``noise_config``, ``num_samples``, ``seed``, ``propagation_backend``,
 >>>>>>> Stashed changes
         ``decoder_backend``/``decoder_config``, etc. (see
@@ -1014,7 +1014,7 @@ class Jobs:
         as any other job — ``job.wait()`` or ``job.stream()``.
         """
         data = self._client._post(
-            "/api/sampler/jobs",
+            "/api/v1/sampling/jobs",
             {"kind": "circuit_direct_sampler", "request": request},
         )
         return self.get(data["job_id"])
@@ -1029,7 +1029,7 @@ class Jobs:
         """Submit a SUSA (DSS) weight-stratified sampling job over a protocol graph.
 
         ``request`` is the same shape ``sample_protocol_subset()`` posts to
-        ``/api/protocol/subset_sampler`` — ``{"config": ..., "noise_config":
+        ``/api/v1/sampling/protocol/subset`` — ``{"config": ..., "noise_config":
         ..., "num_samples": ..., "seed": ..., "susa_config": {...}}``.
         ``susa_config`` requires at minimum ``max_weight`` and ``shots_per_task``.
 
@@ -1040,12 +1040,12 @@ class Jobs:
                       "save_checkpoint": save_checkpoint}
         if resume_from_job_id is not None:
             body["resume_from_job_id"] = resume_from_job_id
-        data = self._client._post("/api/sampler/jobs", body)
+        data = self._client._post("/api/v1/sampling/jobs", body)
         return self.get(data["job_id"])
 
     def get(self, job_id: str) -> SamplerJob:
         """Fetch a job by id."""
-        return SamplerJob(self._client, self._client._get(f"/api/sampler/jobs/{job_id}"))
+        return SamplerJob(self._client, self._client._get(f"/api/v1/sampling/jobs/{job_id}"))
 
     def list(
         self,
@@ -1060,5 +1060,5 @@ class Jobs:
             params["status"] = status
         if kind:
             params["kind"] = kind
-        data = self._client._get("/api/sampler/jobs", params=params)
+        data = self._client._get("/api/v1/sampling/jobs", params=params)
         return [SamplerJob(self._client, item) for item in data["items"]]

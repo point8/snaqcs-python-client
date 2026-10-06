@@ -310,7 +310,7 @@ def test_circuits_delete_calls_delete_method():
     mock_resp.raise_for_status = MagicMock()
     with patch.object(c._transport._session, "delete", return_value=mock_resp) as mock_del:
         c.circuits.delete("my_circ")
-    assert "/api/circuits/my_circ" in mock_del.call_args[0][0]
+    assert "/api/v1/circuits/my_circ" in mock_del.call_args[0][0]
 
 
 def test_circuits_import_qasm_posts_body():
@@ -368,7 +368,7 @@ def test_enumerate_pauli_faults_posts_to_correct_url():
     with patch.object(c._transport._session, "post", return_value=_mock_resp(ENUMERATE_PAULI_PAYLOAD)) as mock_post:
         result = c.enumerate_pauli_faults(circuit=circuit)
     url = mock_post.call_args[0][0]
-    assert url.endswith("/api/enumerate_pauli_faults")
+    assert url.endswith("/api/v1/analysis/circuit/enumerate_pauli_faults")
     assert result["total_faults"] == 3
 
 
@@ -382,13 +382,13 @@ def test_enumerate_pauli_faults_default_fault_types():
 
 
 def test_enumerate_single_faults_alias_posts_to_correct_url():
-    """Backward-compat alias must still reach /api/enumerate_pauli_faults."""
+    """Backward-compat alias must still reach /api/v1/analysis/circuit/enumerate_pauli_faults."""
     c = SnaqcsClient(api_key="snaqcs_x")
     circuit = {"qubits": 3, "layers": []}
     with patch.object(c._transport._session, "post", return_value=_mock_resp(ENUMERATE_PAULI_PAYLOAD)) as mock_post:
         result = c.enumerate_single_faults(circuit=circuit)
     url = mock_post.call_args[0][0]
-    assert url.endswith("/api/enumerate_pauli_faults")
+    assert url.endswith("/api/v1/analysis/circuit/enumerate_pauli_faults")
     assert result["total_faults"] == 3
 
 
@@ -420,7 +420,7 @@ def test_jobs_property_is_cached():
 
 def test_submit_protocol_direct_sampler_posts_kind_and_request_then_fetches_snapshot():
     # kind="protocol_direct_sampler" jobs wrap a protocol-graph request (the same
-    # shape sample_protocol() posts to /api/protocol/direct_sampler), not
+    # shape sample_protocol() posts to /api/v1/sampling/protocol/direct), not
     # the single-circuit sample() shape.
     c = SnaqcsClient(api_key="snaqcs_x")
     request = {"config": {"circuits": {}, "edges": []}, "num_samples": 20}
@@ -428,14 +428,14 @@ def test_submit_protocol_direct_sampler_posts_kind_and_request_then_fetches_snap
          patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())) as mock_get:
         job = c.jobs.submit_protocol_direct_sampler(request)
     assert mock_post.call_args[1]["json"] == {"kind": "protocol_direct_sampler", "request": request}
-    assert mock_get.call_args[0][0].endswith("/api/sampler/jobs/abc-123")
+    assert mock_get.call_args[0][0].endswith("/api/v1/sampling/jobs/abc-123")
     assert isinstance(job, SamplerJob)
     assert job.status == "queued"
 
 
 def test_submit_circuit_direct_sampler_posts_kind_and_request():
     # kind="circuit_direct_sampler" wraps the same shape sample() posts to
-    # /api/circuit/direct_sampler — circuit + classic_functions, optionally
+    # /api/v1/sampling/circuit/direct — circuit + classic_functions, optionally
     # decoder_backend/decoder_config.
     c = SnaqcsClient(api_key="snaqcs_x")
     request = {
@@ -448,7 +448,7 @@ def test_submit_circuit_direct_sampler_posts_kind_and_request():
          patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())) as mock_get:
         job = c.jobs.submit_circuit_direct_sampler(request)
     assert mock_post.call_args[1]["json"] == {"kind": "circuit_direct_sampler", "request": request}
-    assert mock_get.call_args[0][0].endswith("/api/sampler/jobs/xyz-789")
+    assert mock_get.call_args[0][0].endswith("/api/v1/sampling/jobs/xyz-789")
     assert isinstance(job, SamplerJob)
 
 
@@ -575,7 +575,7 @@ def test_sampler_job_delete_calls_delete_endpoint():
     mock_resp.raise_for_status = MagicMock()
     with patch.object(c._transport._session, "delete", return_value=mock_resp) as mock_delete:
         job.delete()
-    assert mock_delete.call_args[0][0].endswith(f"/api/sampler/jobs/{job.id}")
+    assert mock_delete.call_args[0][0].endswith(f"/api/v1/sampling/jobs/{job.id}")
 
 
 def test_sampler_job_delete_401_raises_authentication_error():
@@ -744,7 +744,7 @@ def test_submit_protocol_subset_sampler_posts_kind_and_request_default_no_resume
         job = c.jobs.submit_protocol_subset_sampler(request)
     body = mock_post.call_args[1]["json"]
     assert body == {"kind": "protocol_subset_sampler", "request": request, "save_checkpoint": False}
-    assert mock_get.call_args[0][0].endswith("/api/sampler/jobs/sub-1")
+    assert mock_get.call_args[0][0].endswith("/api/v1/sampling/jobs/sub-1")
     assert isinstance(job, SamplerJob)
 
 
@@ -859,7 +859,7 @@ def test_download_checkpoint_returns_unpacked_dict():
     with patch.object(c._transport._session, "get", return_value=mock_resp) as mock_get:
         got = job.download_checkpoint()
     assert got == cp
-    assert mock_get.call_args[0][0].endswith(f"/api/sampler/jobs/{job.id}/checkpoint")
+    assert mock_get.call_args[0][0].endswith(f"/api/v1/sampling/jobs/{job.id}/checkpoint")
 
 
 def test_download_checkpoint_roundtrips_through_tree_io():

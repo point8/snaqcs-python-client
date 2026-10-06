@@ -48,43 +48,43 @@ def test_api_key_sets_bearer_auth_header():
 def test_send_builds_full_url_from_base_and_path():
     t = _Transport("http://localhost:6090", api_key=None, timeout=60.0)
     with patch.object(t._session, "get", return_value=_mock_resp({})) as mock_get:
-        t.send("GET", "/api/health")
-    assert mock_get.call_args[0] == ("http://localhost:6090/api/health",)
+        t.send("GET", "/api/v1/health")
+    assert mock_get.call_args[0] == ("http://localhost:6090/api/v1/health",)
 
 
 def test_send_connection_error_raises_server_unavailable_error():
     t = _Transport("http://localhost:6090", api_key=None, timeout=60.0)
     with patch.object(t._session, "get", side_effect=requests.exceptions.ConnectionError):
         with pytest.raises(ServerUnavailableError):
-            t.send("GET", "/api/health")
+            t.send("GET", "/api/v1/health")
 
 
 def test_send_401_raises_authentication_error():
     t = _Transport("http://localhost:6090", api_key="snaqcs_bad", timeout=60.0)
     with patch.object(t._session, "get", return_value=_mock_resp(status=401)):
         with pytest.raises(AuthenticationError):
-            t.send("GET", "/api/health")
+            t.send("GET", "/api/v1/health")
 
 
 def test_send_401_with_translate_auth_errors_false_returns_response():
     t = _Transport("http://localhost:6090", api_key=None, timeout=60.0)
     resp = _mock_resp(status=401)
     with patch.object(t._session, "get", return_value=resp):
-        result = t.send("GET", "/api/health", translate_auth_errors=False)
+        result = t.send("GET", "/api/v1/health", translate_auth_errors=False)
     assert result is resp
 
 
 def test_send_defaults_to_transport_timeout():
     t = _Transport("http://localhost:6090", api_key=None, timeout=42.0)
     with patch.object(t._session, "get", return_value=_mock_resp({})) as mock_get:
-        t.send("GET", "/api/health")
+        t.send("GET", "/api/v1/health")
     assert mock_get.call_args[1]["timeout"] == 42.0
 
 
 def test_send_explicit_timeout_overrides_default():
     t = _Transport("http://localhost:6090", api_key=None, timeout=42.0)
     with patch.object(t._session, "get", return_value=_mock_resp({})) as mock_get:
-        t.send("GET", "/api/health", timeout=5.0)
+        t.send("GET", "/api/v1/health", timeout=5.0)
     assert mock_get.call_args[1]["timeout"] == 5.0
 
 

@@ -23,7 +23,7 @@ BASE_URL = "http://localhost:6090"
 def client():
     """SnaqcsClient pointed at local dev server. Skips if server is down."""
     try:
-        requests.get(f"{BASE_URL}/api/health", timeout=2)
+        requests.get(f"{BASE_URL}/api/v1/health", timeout=2)
     except requests.exceptions.ConnectionError:
         pytest.skip("Local dev server not running at http://localhost:6090")
     return SnaqcsClient(base_url=BASE_URL)
@@ -267,3 +267,14 @@ class TestEnumeratePauliFaults:
         result = client.enumerate_single_faults(circuit=steane_circuit)
         assert "total_faults" in result
         assert "faults" in result
+
+
+# ── API path contract against the live schema ─────────────────────────────────
+
+def test_every_client_path_is_served_by_the_live_server(client):
+    """test_api_paths.py checks a frozen route copy; this checks the real one."""
+    from tests.test_api_paths import client_paths, normalise
+
+    spec = requests.get(f"{BASE_URL}/openapi.json", timeout=10).json()
+    served = {normalise(p) for p in spec["paths"]}
+    assert client_paths() - served == set()
