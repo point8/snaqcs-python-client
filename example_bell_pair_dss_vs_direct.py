@@ -8,7 +8,9 @@ import math
 
 from snaqcs import JobFailedError, ServerUnavailableError, SnaqcsClient
 
-TWO_Q_RATE = 0.05
+# At the DSS validity limit: the server rejects subset-sampler jobs with any
+# rate above 0.01 (susa_config.force_out_of_regime overrides; do not).
+TWO_Q_RATE = 0.01
 ANALYTIC_P_FAIL = TWO_Q_RATE * 8 / 15
 
 CIRCUIT = {
@@ -82,7 +84,7 @@ def main():
     for field in ("num_samples", "num_uncorrectable", "uncorrectable_fraction"):
         print(f"  {field:22s} = {direct[field]}")
 
-    print(f"\n Analytic p_logical (0.05 * 8/15) = {ANALYTIC_P_FAIL:.6f}")
+    print(f"\n Analytic p_logical ({TWO_Q_RATE} * 8/15) = {ANALYTIC_P_FAIL:.6f}")
 
     direct_sigma = wald_sigma(direct["uncorrectable_fraction"], direct["num_samples"])
     susa_sigma = (susa["sigma_L"] + susa["sigma_U"]) / 2
