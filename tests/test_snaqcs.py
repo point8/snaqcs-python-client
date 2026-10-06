@@ -226,6 +226,26 @@ def test_sample_omits_decoder_fields_when_not_set():
     assert "propagation_backend" not in body
     assert "decoder_backend" not in body
     assert "decoder_config" not in body
+    # The API's key since the classic-functions rename; the server still reads
+    # the old one, but one key per body keeps the two from ever disagreeing.
+    assert body["classic_functions"] == {"a": "weight > 0"}
+    assert "check_functions" not in body
+
+
+def test_every_function_carrying_body_uses_classic_functions():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    fns = {"a": "b0"}
+    calls = [
+        lambda: c.enumerate_faults({"qubits": 1, "layers": []}, 1, fns),
+        lambda: c.propagate_multiple({"qubits": 1, "layers": []}, [], fns),
+        lambda: c.replayability({"circuits": {}, "edges": []}, fns),
+    ]
+    for call in calls:
+        with patch.object(c._transport._session, "post", return_value=_mock_resp({})) as mock_post:
+            call()
+        body = mock_post.call_args[1]["json"]
+        assert body["classic_functions"] == fns
+        assert "check_functions" not in body
 
 
 def test_sample_passes_decoder_fields_when_set():
@@ -415,12 +435,12 @@ def test_submit_protocol_direct_sampler_posts_kind_and_request_then_fetches_snap
 
 def test_submit_circuit_direct_sampler_posts_kind_and_request():
     # kind="circuit_direct_sampler" wraps the same shape sample() posts to
-    # /api/circuit/direct_sampler — circuit + check_functions, optionally
+    # /api/circuit/direct_sampler — circuit + classic_functions, optionally
     # decoder_backend/decoder_config.
     c = SnaqcsClient(api_key="snaqcs_x")
     request = {
         "circuit": {"qubits": 1, "layers": []},
-        "check_functions": {"a": "weight > 0"},
+        "classic_functions": {"a": "weight > 0"},
         "decoder_backend": "stim",
         "decoder_config": {"stabilizers": ["+Z"], "num_qubits": 1},
     }

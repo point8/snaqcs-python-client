@@ -72,9 +72,9 @@ def main():
     for noise in NOISE_LEVELS:
         job = client.jobs.submit_circuit_direct_sampler({
             "circuit": CIRCUIT,
-            # check_functions is a required field on this endpoint, but we
+            # classic_functions is a required field on this endpoint, but we
             # only care about decoder_summary below, not this predicate.
-            "check_functions": {"anyError": "weight > 0"},
+            "classic_functions": {"anyError": "weight > 0"},
             "noise_config": noise,
             "num_samples": NUM_SHOTS,
             "seed": SEED,

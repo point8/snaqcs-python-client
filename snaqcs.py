@@ -415,12 +415,13 @@ class SnaqcsClient:
         """Enumerate all fault configurations up to a given weight.
 
         ``check_functions`` is a dict of named simpleeval expressions evaluated
-        per-fault 
+        per-fault. It goes out as ``classic_functions``, the API's name for them
+        (the server still reads ``check_functions``).
         """
         body: dict = {
             "circuit": circuit,
             "max_fault_weight": max_fault_weight,
-            "check_functions": check_functions,
+            "classic_functions": check_functions,
             "return_details": return_details,
         }
         if fault_types is not None:
@@ -446,7 +447,7 @@ class SnaqcsClient:
         """
         body: dict = {
             "circuit": circuit,
-            "check_functions": check_functions,
+            "classic_functions": check_functions,
             "noise_config": noise_config or {},
             "num_samples": num_samples,
             "seed": seed,
@@ -555,7 +556,7 @@ class SnaqcsClient:
         return self._post("/api/multiple_faults", {
             "circuit": circuit,
             "faults": faults,
-            "check_functions": check_functions,
+            "classic_functions": check_functions,
             "return_intermediate": return_intermediate,
         })
 
@@ -629,7 +630,7 @@ class SnaqcsClient:
         """
         body: dict = {"config": config}
         if check_functions is not None:
-            body["check_functions"] = check_functions
+            body["classic_functions"] = check_functions
         return self._post("/api/protocol/replayability", body)
 
     def replay(
@@ -647,7 +648,7 @@ class SnaqcsClient:
         ``verdict_source``, ``record_reached_fail``, ``terminal_state_matches``,
         ``outcome_mismatch_visits`` and ``config_drift``.
 
-        Predicates are compiled from ``config["check_functions"]`` as strings — a
+        Predicates are compiled from ``config["classic_functions"]`` as strings — a
         record captured in-process with live callables cannot be replayed here.
         A record captured against a different resolved config is a 409; pass
         ``ignore_config_drift=True`` only when the difference is cosmetic.
@@ -791,7 +792,7 @@ class SamplerJob:
 
         job = client.jobs.submit_protocol_direct_sampler({
             "circuit": {...},
-            "check_functions": {"anyError": "weight > 0"},
+            "classic_functions": {"anyError": "weight > 0"},
             "num_samples": 10_000,
         })
         job = job.wait()
@@ -1001,8 +1002,13 @@ class Jobs:
         """Submit a single-circuit direct-sampler job.
 
         ``request`` is the same shape ``sample()`` posts to
+<<<<<<< Updated upstream
         ``/api/circuit/direct_sampler`` — ``circuit``, ``check_functions``,
         ``noise_config``, ``num_samples``, ``seed``,
+=======
+        ``/api/circuit/direct_sampler`` — ``circuit``, ``classic_functions``,
+        ``noise_config``, ``num_samples``, ``seed``, ``propagation_backend``,
+>>>>>>> Stashed changes
         ``decoder_backend``/``decoder_config``, etc. (see
         ``SnaqcsClient.sample``'s docstring). Progress streams the same way
         as any other job — ``job.wait()`` or ``job.stream()``.
