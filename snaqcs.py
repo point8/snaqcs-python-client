@@ -507,8 +507,9 @@ class SnaqcsClient:
     ) -> dict:
         """POST /api/v1/sampling/protocol/subset — SUSA weight-stratified DSS sampling.
 
-        susa_config keys: max_weight (int), shots_per_task (int), eta_max (float),
+        susa_config keys: max_weight (int), L_max (int), eta_max (float),
                           n_max (int, optional), backend (str, optional).
+                          shots_per_task is deprecated and ignored by the server.
         Returns a superset of the direct_sampler response with extra DSS fields:
         p_logical, p_lower, p_upper, sigma_L, sigma_U, delta, eta.
 
@@ -1031,7 +1032,8 @@ class Jobs:
         ``request`` is the same shape ``sample_protocol_subset()`` posts to
         ``/api/v1/sampling/protocol/subset`` — ``{"config": ..., "noise_config":
         ..., "num_samples": ..., "seed": ..., "susa_config": {...}}``.
-        ``susa_config`` requires at minimum ``max_weight`` and ``shots_per_task``.
+        ``susa_config`` requires at minimum ``max_weight`` and ``L_max``
+        (``shots_per_task`` is deprecated and ignored by the server).
 
         ``save_checkpoint`` stores the final EventTree for later resume/inspection.
         ``resume_from_job_id`` warm-starts from a prior completed+checkpointed job.
