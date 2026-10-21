@@ -1003,13 +1003,8 @@ class Jobs:
         """Submit a single-circuit direct-sampler job.
 
         ``request`` is the same shape ``sample()`` posts to
-<<<<<<< Updated upstream
-        ``/api/v1/sampling/circuit/direct`` — ``circuit``, ``check_functions``,
-        ``noise_config``, ``num_samples``, ``seed``,
-=======
         ``/api/v1/sampling/circuit/direct`` — ``circuit``, ``classic_functions``,
         ``noise_config``, ``num_samples``, ``seed``, ``propagation_backend``,
->>>>>>> Stashed changes
         ``decoder_backend``/``decoder_config``, etc. (see
         ``SnaqcsClient.sample``'s docstring). Progress streams the same way
         as any other job — ``job.wait()`` or ``job.stream()``.
