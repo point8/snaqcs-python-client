@@ -558,6 +558,80 @@ def test_sampler_job_wait_raises_timeout_error(monkeypatch):
             job.wait(timeout=5.0, poll=0)
 
 
+@pytest.fixture
+def fake_clock(monkeypatch):
+    """time.monotonic() that only time.sleep() advances."""
+    now = [0.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(time, "sleep", lambda s: now.__setitem__(0, now[0] + s))
+    return now
+
+
+def _http_error_resp(status):
+    resp = MagicMock()
+    resp.status_code = status
+    resp.raise_for_status.side_effect = requests.exceptions.HTTPError(response=resp)
+    return resp
+
+
+def test_sampler_job_wait_rides_out_server_restart(fake_clock):
+    """A deploy restarts the API mid-wait: urllib3 gives up on the 502s, then
+    nothing listens, then the proxy says 503 — wait() must keep polling."""
+    c = SnaqcsClient(api_key="snaqcs_x")
+    job = SamplerJob(c, _job_snapshot(status="running"))
+    responses = iter([
+        requests.exceptions.RetryError("too many 502 error responses"),
+        requests.exceptions.ConnectionError("connection refused"),
+        _http_error_resp(503),
+        _mock_resp(_job_snapshot(status="completed", result={})),
+    ])
+
+    def get(*a, **k):
+        r = next(responses)
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    with patch.object(c._transport._session, "get", side_effect=get):
+        job.wait(timeout=3600, poll=0)
+    assert job.status == "completed"
+
+
+def test_sampler_job_wait_gives_up_after_max_outage(fake_clock):
+    import snaqcs
+
+    c = SnaqcsClient(api_key="snaqcs_x")
+    job = SamplerJob(c, _job_snapshot(status="running"))
+    with patch.object(
+        c._transport._session, "get",
+        side_effect=requests.exceptions.RetryError("too many 502 error responses"),
+    ):
+        with pytest.raises(requests.exceptions.RetryError):
+            job.wait(poll=0)
+    assert fake_clock[0] >= snaqcs._MAX_OUTAGE_SECONDS
+
+
+def test_sampler_job_wait_outage_past_timeout_raises_timeout_error(fake_clock):
+    c = SnaqcsClient(api_key="snaqcs_x")
+    job = SamplerJob(c, _job_snapshot(status="running"))
+    with patch.object(
+        c._transport._session, "get",
+        side_effect=requests.exceptions.ConnectionError("connection refused"),
+    ):
+        with pytest.raises(TimeoutError):
+            job.wait(timeout=5.0, poll=0)
+    assert fake_clock[0] == pytest.approx(5.0)
+
+
+def test_sampler_job_wait_does_not_retry_non_transient_http_error(fake_clock):
+    c = SnaqcsClient(api_key="snaqcs_x")
+    job = SamplerJob(c, _job_snapshot(status="running"))
+    with patch.object(c._transport._session, "get", return_value=_http_error_resp(404)) as mock_get:
+        with pytest.raises(requests.exceptions.HTTPError):
+            job.wait(poll=0)
+    assert mock_get.call_count == 1
+
+
 def test_sampler_job_cancel_posts_reason_and_refreshes():
     c = SnaqcsClient(api_key="snaqcs_x")
     job = SamplerJob(c, _job_snapshot(status="running"))
@@ -631,6 +705,19 @@ def test_sampler_job_stream_falls_back_to_polling_on_connection_error():
         with patch("time.sleep", return_value=None):
             events = list(job.stream())
 
+    assert events[-1]["status"] == "completed"
+
+
+def test_sampler_job_stream_polling_fallback_rides_out_server_restart(fake_clock):
+    c = SnaqcsClient(api_key="snaqcs_x")
+    job = SamplerJob(c, _job_snapshot(status="running"))
+    with patch.object(c._transport._session, "get") as mock_get:
+        mock_get.side_effect = [
+            requests.exceptions.ConnectionError("stream unavailable"),
+            requests.exceptions.RetryError("too many 502 error responses"),
+            _mock_resp(_job_snapshot(status="completed", result={})),
+        ]
+        events = list(job.stream(timeout=3600))
     assert events[-1]["status"] == "completed"
 
 

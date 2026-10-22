@@ -778,6 +778,29 @@ class Circuits:
 # source of truth across the wire, so keep these two in sync by hand.
 _TERMINAL_JOB_STATUSES = {"completed", "failed", "cancelled"}
 
+# A deploy restarts the API container while the job keeps running in the
+# worker; the edge proxy answers 502/503/504 until the API is back. The
+# transport's urllib3 retries span well under a second, far shorter than a
+# restart, so long-running polls ride out the outage themselves.
+_TRANSIENT_HTTP_STATUSES = {502, 503, 504}
+_MAX_OUTAGE_SECONDS = 600.0
+
+
+def _is_transient(exc: Exception) -> bool:
+    if isinstance(exc, requests.exceptions.HTTPError):
+        return exc.response is not None and exc.response.status_code in _TRANSIENT_HTTP_STATUSES
+    # RetryError: urllib3 exhausted its retries on a 5xx in status_forcelist.
+    # ServerUnavailableError / ConnectionError: nothing listening (yet).
+    return isinstance(
+        exc,
+        (
+            ServerUnavailableError,
+            requests.exceptions.RetryError,
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+        ),
+    )
+
 
 class SamplerJob:
     """
@@ -866,18 +889,49 @@ class SamplerJob:
         self._snap = self._client._get(f"/api/v1/sampling/jobs/{self.id}")
         return self
 
+    def _refresh_through_outage(self, deadline: Optional[float]) -> "SamplerJob":
+        """``refresh()``, retrying with backoff while the server is restarting.
+
+        Gives up with the original error after ``_MAX_OUTAGE_SECONDS`` of
+        continuous outage, or with ``TimeoutError`` once ``deadline`` (a
+        ``time.monotonic()`` value) passes. Non-transient errors (401, 404,
+        ...) propagate immediately.
+        """
+        outage_start: Optional[float] = None
+        delay = 1.0
+        while True:
+            try:
+                return self.refresh()
+            except Exception as exc:
+                if not _is_transient(exc):
+                    raise
+                now = time.monotonic()
+                if outage_start is None:
+                    outage_start = now
+                if now - outage_start >= _MAX_OUTAGE_SECONDS:
+                    raise
+                if deadline is not None and now >= deadline:
+                    raise TimeoutError(
+                        f"Job {self.id} did not finish in time; server unreachable"
+                    ) from exc
+                sleep_for = delay if deadline is None else min(delay, deadline - now)
+                time.sleep(sleep_for)
+                delay = min(delay * 2, 30.0)
+
     def wait(self, timeout: Optional[float] = None, poll: float = 2.0) -> "SamplerJob":
         """Block until the job reaches a terminal state, then return self.
 
         Raises ``JobFailedError``/``JobCancelledError`` on those terminal
-        states; ``TimeoutError`` if ``timeout`` elapses first.
+        states; ``TimeoutError`` if ``timeout`` elapses first. Rides out a
+        server restart (502/503/504, connection refused) of up to ten minutes.
         """
         start = time.monotonic()
+        deadline = None if timeout is None else start + timeout
         while self.status not in _TERMINAL_JOB_STATUSES:
             if timeout is not None and time.monotonic() - start > timeout:
                 raise TimeoutError(f"Job {self.id} did not finish within {timeout}s")
             time.sleep(poll)
-            self.refresh()
+            self._refresh_through_outage(deadline)
         if self.status == "failed":
             err = self.error or {}
             raise JobFailedError(err.get("message", "unknown error"))
@@ -916,7 +970,7 @@ class SamplerJob:
         except (ServerUnavailableError, requests.exceptions.ConnectionError):
             while True:
                 _check_deadline()
-                self.refresh()
+                self._refresh_through_outage(deadline)
                 yield self._snap
                 if self.status in _TERMINAL_JOB_STATUSES:
                     return
