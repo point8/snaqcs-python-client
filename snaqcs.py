@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 from dataclasses import dataclass
@@ -1113,3 +1114,370 @@ class Jobs:
             params["kind"] = kind
         data = self._client._get("/api/v1/sampling/jobs", params=params)
         return [SamplerJob(self._client, item) for item in data["items"]]
+
+
+# ── Offline DSS reconstruction ───────────────────────────────────────────────
+#
+# Pure-Python helpers over a subset-sampler (DSS) result dict. They mirror the
+# server's dss_subset_table / dss_renewal / dss_variance modules;
+# tests/test_dss_reconstruct.py holds them to a server result at rel 1e-9.
+# Heussen et al. 2024, Eqs. (2)/(4):
+# p_L(p) = sum_w A_w(p) p_w, A_w = prod_i C(N_i, w_i) p_i^w_i (1 - p_i)^(N_i - w_i).
+
+
+def _dss_p_vec(result: dict, p) -> list:
+    """A per-partition rate vector: a list as given, a scalar scales the run's ratios."""
+    if isinstance(p, (list, tuple)):
+        return [float(x) for x in p]
+    ref = result["p_ref_vec"]
+    top = max(ref)
+    return [r * float(p) / top for r in ref]
+
+
+def _dss_counts(sites: dict, node: str, order: list) -> list:
+    s = sites.get(node, {})
+    return [int(s.get(label, 0)) for label in order]
+
+
+def _dss_subset_prob(counts, w, p_vec) -> float:
+    prob = 1.0
+    for i in range(max(len(counts), len(w))):
+        n_i = int(counts[i]) if i < len(counts) else 0
+        w_i = int(w[i]) if i < len(w) else 0
+        if w_i == 0 and n_i == 0:
+            continue
+        if w_i > n_i:
+            return 0.0
+        p_i = float(p_vec[i])
+        prob *= math.comb(n_i, w_i) * p_i**w_i * (1.0 - p_i) ** (n_i - w_i)
+    return prob
+
+
+def _dss_key(path) -> tuple:
+    return tuple((s["node"], tuple(s["weight"])) for s in path)
+
+
+def _dss_index(rows) -> dict:
+    index: dict = {}
+    for r in rows:
+        index.setdefault((_dss_key(r["path"]), r["node"]), []).append(r)
+    return index
+
+
+def dss_p_lower(result: dict, p) -> float:
+    """The server's lower end p_lower at any noise strength, from the subset table.
+
+    ``p`` is a per-partition list (in ``partition_order``) or a scalar s, which
+    scales the run's rate ratios (``p_vec = p_ref_vec * s / max(p_ref_vec)``).
+    Returns F / (1 - D), conditioned on acceptance as the server's p_lower is.
+    """
+    p_vec = _dss_p_vec(result, p)
+    sites, order = result["fault_sites_by_node"], result["partition_order"]
+    index = _dss_index(result["subset_rates"])
+
+    def fold(key, node):
+        f = d = 0.0
+        for r in index.get((key, node), []):
+            a = _dss_subset_prob(_dss_counts(sites, r["node"], order), r["weight"], p_vec)
+            rf, rd = r["q_fail_local"], r["n_discard"] / r["n"]
+            own = key + ((r["node"], tuple(r["weight"])),)
+            for child, frac in r["branches"].items():
+                cf, cd = fold(own, child)
+                rf += frac * cf
+                rd += frac * cd
+            f += a * rf
+            d += a * rd
+        return f, d
+
+    roots = [r for r in result["subset_rates"] if not r["path"]]
+    if not roots:
+        return 0.0
+    F, D = fold((), roots[0]["node"])
+    return F / (1.0 - D) if D else F
+
+
+def _dss_comb_ratio(counts, weight, ratios) -> float:
+    out = 1.0
+    for n_i, w_i, r_i in zip(counts, weight, ratios):
+        if w_i > n_i:
+            return 0.0
+        out *= math.comb(n_i, w_i) * float(r_i) ** w_i
+    return out
+
+
+def dss_leading_coefficient(result: dict) -> tuple:
+    """``(k, c_k)``: c_k = lim p_L / s^k along the run's rate ratios, from the table.
+
+    The counterpart of ``a`` in a fit p_L = a p^b with b = k. ``(None, None)``
+    when no sampled subset failed.
+    """
+    sites, order = result["fault_sites_by_node"], result["partition_order"]
+    ref = result["p_ref_vec"]
+    ratios = [r / max(ref) for r in ref]
+    rows = result["subset_rates"]
+    by_key = {_dss_key(r["path"]) + ((r["node"], tuple(r["weight"])),): r for r in rows}
+    coeffs: dict = {}
+    for r in rows:
+        if r["q_fail_local"] <= 0.0 or r["path_weight"] < 1:
+            continue
+        term = _dss_comb_ratio(_dss_counts(sites, r["node"], order), r["weight"], ratios)
+        term *= r["q_fail_local"]
+        prefix: tuple = ()
+        for i, step in enumerate(r["path"]):
+            prefix = prefix + ((step["node"], tuple(step["weight"])),)
+            nxt = r["path"][i + 1]["node"] if i + 1 < len(r["path"]) else r["node"]
+            term *= _dss_comb_ratio(_dss_counts(sites, step["node"], order), step["weight"], ratios)
+            term *= by_key[prefix]["branches"].get(nxt, 0.0)
+        coeffs[r["path_weight"]] = coeffs.get(r["path_weight"], 0.0) + term
+    positive = sorted(k for k, c in coeffs.items() if c > 0.0)
+    if not positive:
+        return None, None
+    return positive[0], coeffs[positive[0]]
+
+
+def _dss_require_renewal(result: dict) -> None:
+    if not result.get("renewal"):
+        raise ValueError(result.get("renewal_note") or "this result has no renewal form")
+
+
+def dss_renewal_p_lower(result: dict, p) -> float:
+    """p_L = F / (1 - R) at any p from the attempt table (repeat-until-success only)."""
+    _dss_require_renewal(result)
+    p_vec = _dss_p_vec(result, p)
+    sites, order = result["attempt_sites"], result["partition_order"]
+    F = R = 0.0
+    for a in result["attempt_rates"]:
+        A = 1.0
+        for s in a["steps"]:
+            A *= _dss_subset_prob(_dss_counts(sites, s["node"], order), s["weight"], p_vec)
+        F += A * a["f"]
+        R += A * a["r"]
+    return F / (1.0 - R)
+
+
+# Port of the server's dss_variance fold (itself a port of snaqcs-susa stats.cpp).
+
+
+def _dss_wilson_cov(counts):
+    K, n = len(counts), sum(counts)
+    pi = [float(c) / float(n) for c in counts]
+    gamma = [[0.0] * K for _ in range(K)]
+    if K < 2:
+        return pi, gamma
+    nn = float(n)
+    den = (nn + 1.0) * (nn + 1.0)
+    off = 1.0 / (4.0 * (K - 1))
+    for a in range(K):
+        gamma[a][a] = (nn * pi[a] * (1.0 - pi[a]) + 0.25) / den
+        for b in range(a + 1, K):
+            gamma[a][b] = gamma[b][a] = (-nn * pi[a] * pi[b] - off) / den
+    return pi, gamma
+
+
+def _dss_binomial(n, w, p):
+    if w > n:
+        return 0.0
+    if n == 0:
+        return 1.0
+    if p <= 0.0:
+        return 1.0 if w == 0 else 0.0
+    if p >= 1.0:
+        return 1.0 if w == n else 0.0
+    return math.comb(n, w) * p**w * (1.0 - p) ** (n - w)
+
+
+def _dss_up_to(counts, budget):
+    out, cur = [], [0] * len(counts)
+
+    def rec(i, rem):
+        if i == len(counts):
+            out.append(tuple(cur))
+            return
+        for v in range(min(rem, counts[i]) + 1):
+            cur[i] = v
+            rec(i + 1, rem - v)
+        cur[i] = 0
+
+    rec(0, budget)
+    return out
+
+
+def _dss_layer(counts, T):
+    if not counts:
+        return [()] if T == 0 else []
+    out, cur = [], [0] * len(counts)
+
+    def rec(i, rem):
+        if i == len(counts) - 1:
+            if rem <= counts[i] and rem <= 255:
+                cur[i] = rem
+                out.append(tuple(cur))
+            cur[i] = 0
+            return
+        for v in range(min(rem, counts[i], 255) + 1):
+            cur[i] = v
+            rec(i + 1, rem - v)
+        cur[i] = 0
+
+    rec(0, T)
+    return out
+
+
+def _dss_unsampled_mass(counts, sampled, p_vec, budget):
+    S = {tuple(int(x) for x in w) for w in sampled}
+    mass = 0.0
+    if budget >= 0:
+        for w in _dss_up_to(counts, min(budget, sum(counts))):
+            if w not in S:
+                mass += _dss_subset_prob(counts, w, p_vec)
+    pmf = [1.0]
+    for n_i, p_i in zip(counts, p_vec):
+        a = [_dss_binomial(n_i, w, p_i) for w in range(n_i + 1)]
+        while len(a) > 1 and a[-1] == 0.0:
+            a.pop()
+        conv = [0.0] * (len(pmf) + len(a) - 1)
+        for x, px in enumerate(pmf):
+            for y, ay in enumerate(a):
+                conv[x + y] += px * ay
+        pmf = conv
+    lo = max(budget + 1, 0)
+    S_T: dict = {}
+    for w in S:
+        if sum(w) >= lo:
+            S_T[sum(w)] = S_T.get(sum(w), 0.0) + _dss_subset_prob(counts, w, p_vec)
+    over_255 = any(n > 255 for n in counts)
+    for T in range(lo, max(len(pmf) - 1, max(S_T, default=-1)) + 1):
+        pT = pmf[T] if T < len(pmf) else 0.0
+        if T not in S_T:
+            mass += pT
+        elif S_T[T] <= 0.5 * pT or (T > 255 and over_255):
+            mass += max(0.0, pT - S_T[T])
+        else:
+            mass += sum(
+                _dss_subset_prob(counts, w, p_vec) for w in _dss_layer(counts, T) if w not in S
+            )
+    return mass
+
+
+def _dss_attempt_fold(result, p_vec):
+    """One attempt's fold: (p_fail, delta, p_disc, var_lo, var_hi, var_disc, cov_fd, terms)."""
+    sites, order = result["fault_sites_by_node"], result["partition_order"]
+    t_ft = int(result["t_ft"])
+    start = next(r["node"] for r in result["subset_rates"] if not r["path"])
+    index = _dss_index(result["subset_rates"])
+    terms = []
+
+    def circuit(key, node, cum_above, mult):
+        out = [0.0] * 7
+        rows_here = index.get((key, node), [])
+        counts = _dss_counts(sites, node, order)
+        for r in rows_here:
+            A = _dss_subset_prob(counts, r["weight"], p_vec)
+            wf = subset(r, key, cum_above, mult * A * A)
+            for i in range(3):
+                out[i] += A * wf[i]
+            for i in range(3, 7):
+                out[i] += A * A * wf[i]
+        out[1] += _dss_unsampled_mass(
+            counts, [r["weight"] for r in rows_here], p_vec, t_ft - cum_above
+        )
+        return out
+
+    def subset(r, key, cum_above, mult):
+        cats = r["categories"]
+        counts = [c["count"] for c in cats]
+        K = len(cats)
+        if r["fault_free"]:
+            pi, gamma = [c / r["n"] for c in counts], [[0.0] * K for _ in range(K)]
+        else:
+            pi, gamma = _dss_wilson_cov(counts)
+        own = key + ((r["node"], tuple(r["weight"])),)
+        below = cum_above + sum(r["weight"])
+        sub = {}
+        for a, c in enumerate(cats):
+            if c["kind"] == "succ" and c["child"] != start:
+                sub[a] = circuit(own, c["child"], below, mult * (gamma[a][a] + pi[a] * pi[a]))
+        out = [0.0] * 7
+        DL, DU, DD = [0.0] * K, [0.0] * K, [0.0] * K
+        for a, c in enumerate(cats):
+            L = X = D = 0.0
+            if c["kind"] == "succ":
+                if c["child"] == start:
+                    D = 1.0
+                else:
+                    L, X, D = sub[a][0], sub[a][1], sub[a][2]
+            elif c["kind"] == "fail":
+                L = 1.0
+            elif c["kind"] in ("unr", "trunc"):
+                X = 1.0
+            elif c["kind"] == "discard":
+                D = 1.0
+            DL[a], DU[a], DD[a] = L, L + X, D
+            out[0] += pi[a] * L
+            out[1] += pi[a] * X
+            out[2] += pi[a] * D
+
+        def quad(Dv, Ev):
+            s = 0.0
+            for a in range(K):
+                for b in range(a + 1, K):
+                    s += -gamma[a][b] * (Dv[a] - Dv[b]) * (Ev[a] - Ev[b])
+            return s
+
+        out[3], out[4], out[5], out[6] = quad(DL, DL), quad(DU, DU), quad(DD, DD), quad(DL, DD)
+        terms.append((r, mult * out[3]))
+        for a, s in sub.items():
+            c = gamma[a][a] + pi[a] * pi[a]
+            for i in range(3, 7):
+                out[i] += c * s[i]
+        return out
+
+    return circuit((), start, 0, 1.0), terms
+
+
+def dss_renewal_bracket(result: dict, p) -> dict:
+    """The certified renewal bracket at any p (repeat-until-success only).
+
+    Same keys as the server's ``renewal_curve`` points. M is read from
+    ``result["renewal_max_attempts"]``: the lower end is a lower bound on the
+    protocol as capped by its max_rounds.
+    """
+    _dss_require_renewal(result)
+    p_vec = _dss_p_vec(result, p)
+    fold, terms = _dss_attempt_fold(result, p_vec)
+    F, U, R, var_F, var_U, var_R, cov = fold
+    sF, sU, sD = math.sqrt(max(var_F, 0.0)), math.sqrt(max(var_U, 0.0)), math.sqrt(max(var_R, 0.0))
+    acc = max(1e-300, 1.0 - R)
+
+    def sigma(num, s_num, den):
+        var = s_num**2 / den**2 + num**2 * sD**2 / den**4 + 2 * num * cov / den**3
+        return math.sqrt(max(var, 0.0))
+
+    lower, s_lower = F / acc, sigma(F, sF, acc)
+    up_fail = (F + U) / acc
+    shrunk = acc - U
+    up_discard = F / shrunk if shrunk > 0 else 1.0
+    if up_fail >= up_discard:
+        upper, s_upper = up_fail, sigma(F + U, sU, acc)
+    else:
+        upper, s_upper = up_discard, sigma(F, sU, max(shrunk, 1e-300))
+    upper = min(1.0, upper)
+    factor = 1.0 - R ** int(result["renewal_max_attempts"])
+    top = sorted(terms, key=lambda t: t[1], reverse=True)[:5]
+    return {
+        "p": max(p_vec),
+        "p_vec": p_vec,
+        "p_lower": max(0.0, lower) * factor,
+        "p_upper": upper,
+        "sigma_L": s_lower * factor,
+        "sigma_U": s_upper,
+        "p_upper_certified": upper + 3.0 * s_upper,
+        "F": F,
+        "R": R,
+        "U": U,
+        "top_sigma_rows": [
+            {"path": r["path"], "node": r["node"], "weight": r["weight"], "share": v / var_F}
+            for r, v in top
+            if var_F > 0 and v > 0
+        ],
+    }
