@@ -1486,7 +1486,8 @@ def _dss_attempt_fold(result, p_vec):
 def dss_renewal_bracket(result: dict, p) -> dict:
     """The certified renewal bracket at any p (repeat-until-success only).
 
-    Same keys as the server's ``renewal_curve`` points. M is read from
+    Keys: p, p_vec, p_lower, p_upper, sigma_L, sigma_U, p_upper_certified, F, R, U
+    and top_sigma_rows. M is read from
     ``result["renewal_max_attempts"]``: the lower end is a lower bound on the
     protocol as capped by its max_rounds.
     """

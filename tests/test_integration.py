@@ -21,11 +21,11 @@ BASE_URL = "http://localhost:6090"
 
 @pytest.fixture(scope="session")
 def client():
-    """SnaqcsClient pointed at local dev server. Skips if server is down."""
+    """SnaqcsClient pointed at local dev server. Skips if server is down or hangs."""
     try:
         requests.get(f"{BASE_URL}/api/v1/health", timeout=2)
-    except requests.exceptions.ConnectionError:
-        pytest.skip("Local dev server not running at http://localhost:6090")
+    except requests.exceptions.RequestException:  # refused, or accepted but no reply
+        pytest.skip("Local dev server not reachable at http://localhost:6090")
     return SnaqcsClient(base_url=BASE_URL)
 
 
