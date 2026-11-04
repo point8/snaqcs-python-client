@@ -60,3 +60,13 @@ def test_renewal_helper_refuses_non_renewal_result(res):
         dss_renewal_p_lower(bad, 1e-4)
     with pytest.raises(ValueError, match="visits"):
         dss_renewal_bracket(bad, 1e-4)
+
+
+def test_helpers_name_the_flag_when_the_tables_are_missing(res):
+    # The server leaves the tables out unless include_subset_rates is set.
+    bare = {**res, "subset_rates": [], "attempt_rates": []}
+    for helper in (dss_p_lower, dss_renewal_p_lower, dss_renewal_bracket):
+        with pytest.raises(ValueError, match="include_subset_rates"):
+            helper(bare, 1e-4)
+    with pytest.raises(ValueError, match="include_subset_rates"):
+        dss_leading_coefficient(bare)

@@ -1164,6 +1164,14 @@ def _dss_index(rows) -> dict:
     return index
 
 
+def _dss_require_table(result: dict, key: str = "subset_rates") -> None:
+    if not result.get(key):
+        raise ValueError(
+            f"this result has no {key}: submit the run with "
+            "include_subset_rates=True in its susa config"
+        )
+
+
 def dss_p_lower(result: dict, p) -> float:
     """The server's lower end p_lower at any noise strength, from the subset table.
 
@@ -1171,6 +1179,7 @@ def dss_p_lower(result: dict, p) -> float:
     scales the run's rate ratios (``p_vec = p_ref_vec * s / max(p_ref_vec)``).
     Returns F / (1 - D), conditioned on acceptance as the server's p_lower is.
     """
+    _dss_require_table(result)
     p_vec = _dss_p_vec(result, p)
     sites, order = result["fault_sites_by_node"], result["partition_order"]
     index = _dss_index(result["subset_rates"])
@@ -1211,6 +1220,7 @@ def dss_leading_coefficient(result: dict) -> tuple:
     The counterpart of ``a`` in a fit p_L = a p^b with b = k. ``(None, None)``
     when no sampled subset failed.
     """
+    _dss_require_table(result)
     sites, order = result["fault_sites_by_node"], result["partition_order"]
     ref = result["p_ref_vec"]
     ratios = [r / max(ref) for r in ref]
@@ -1243,6 +1253,7 @@ def _dss_require_renewal(result: dict) -> None:
 def dss_renewal_p_lower(result: dict, p) -> float:
     """p_L = F / (1 - R) at any p from the attempt table (repeat-until-success only)."""
     _dss_require_renewal(result)
+    _dss_require_table(result, "attempt_rates")
     p_vec = _dss_p_vec(result, p)
     sites, order = result["attempt_sites"], result["partition_order"]
     F = R = 0.0
@@ -1443,6 +1454,7 @@ def dss_renewal_bracket(result: dict, p) -> dict:
     protocol as capped by its max_rounds.
     """
     _dss_require_renewal(result)
+    _dss_require_table(result)
     p_vec = _dss_p_vec(result, p)
     fold, terms = _dss_attempt_fold(result, p_vec)
     F, U, R, var_F, var_U, var_R, cov = fold
