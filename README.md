@@ -36,7 +36,7 @@ export SNAQCS_API_URL=https://snaqcs.point8.cloud
 ```
 
 **For contributors:** If you are running the snaQCs backend locally for
-development (`make start-backend` → `http://localhost:6090`), you can connect
+development (`just start-backend` → `http://localhost:6090`), you can connect
 without a key — the dev server runs with authentication disabled. `client =
 SnaqcsClient()` will default to `http://localhost:6090` when no `SNAQCS_API_URL` is
 set.
