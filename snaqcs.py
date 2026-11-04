@@ -1250,14 +1250,51 @@ def _dss_require_renewal(result: dict) -> None:
         raise ValueError(result.get("renewal_note") or "this result has no renewal form")
 
 
+def dss_attempt_rates(result: dict) -> list:
+    """One attempt's subset table, derived from ``subset_rates``.
+
+    An attempt runs from the start node until the shot ends or loops back to the
+    start. Each row is one way an attempt can go: ``steps`` (node and weight tuple
+    along it), ``attempt_weight`` (total faults), ``f`` (the fraction that ends in
+    FAIL) and ``r`` (the fraction that loops back to repeat). Both are independent
+    of p, so p_L(p) = sum A_s(p) f_s / (1 - sum A_s(p) r_s).
+
+    Valid only for repeat-until-success protocols where every repeat starts fresh;
+    the server decides that and reports it as ``result["renewal"]``, and this raises
+    with its ``renewal_note`` otherwise.
+    """
+    _dss_require_renewal(result)
+    _dss_require_table(result)
+    rows = result["subset_rates"]
+    start = next(r["node"] for r in rows if not r["path"])
+    index = _dss_index(rows)
+    out: list = []
+
+    def walk(path, node, steps, frac):
+        for r in index.get((_dss_key(path), node), []):
+            step = {"node": r["node"], "weight": list(r["weight"])}
+            st = steps + [step]
+            out.append({
+                "steps": st,
+                "attempt_weight": sum(sum(s["weight"]) for s in st),
+                "f": frac * r["q_fail_local"],               # attempt ends in FAIL
+                "r": frac * r["branches"].get(start, 0.0),   # attempt loops back: repeat
+            })
+            for child, b in r["branches"].items():
+                if child != start:                           # stay within one attempt
+                    walk(path + [step], child, st, frac * b)
+
+    walk([], start, [], 1.0)
+    return out
+
+
 def dss_renewal_p_lower(result: dict, p) -> float:
     """p_L = F / (1 - R) at any p from the attempt table (repeat-until-success only)."""
-    _dss_require_renewal(result)
-    _dss_require_table(result, "attempt_rates")
+    attempts = dss_attempt_rates(result)
     p_vec = _dss_p_vec(result, p)
-    sites, order = result["attempt_sites"], result["partition_order"]
+    sites, order = result["fault_sites_by_node"], result["partition_order"]
     F = R = 0.0
-    for a in result["attempt_rates"]:
+    for a in attempts:
         A = 1.0
         for s in a["steps"]:
             A *= _dss_subset_prob(_dss_counts(sites, s["node"], order), s["weight"], p_vec)
