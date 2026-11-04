@@ -1119,8 +1119,10 @@ class Jobs:
 # ── Offline DSS reconstruction ───────────────────────────────────────────────
 #
 # Pure-Python helpers over a subset-sampler (DSS) result dict. They mirror the
-# server's dss_subset_table / dss_renewal / dss_variance modules;
-# tests/test_dss_reconstruct.py holds them to a server result at rel 1e-9.
+# server's dss_subset_table and dss_variance modules and its reference
+# dss_renewal.renewal_bracket; dss_attempt_rates is client-only. 
+# tests/test_dss_reconstruct.py holds
+# them to a server result at rel 1e-9.
 # Heussen et al. 2024, Eqs. (2)/(4):
 # p_L(p) = sum_w A_w(p) p_w, A_w = prod_i C(N_i, w_i) p_i^w_i (1 - p_i)^(N_i - w_i).
 
@@ -1262,6 +1264,10 @@ def dss_attempt_rates(result: dict) -> list:
     Valid only for repeat-until-success protocols where every repeat starts fresh;
     the server decides that and reports it as ``result["renewal"]``, and this raises
     with its ``renewal_note`` otherwise.
+
+    Unlike the attempt rows older servers sent, these carry no ``subset_prob`` (A at
+    the run's p; compute A at any p from ``fault_sites_by_node`` instead) and no
+    ``n`` (shots are in the matching ``subset_rates`` row).
     """
     _dss_require_renewal(result)
     _dss_require_table(result)

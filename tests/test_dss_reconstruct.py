@@ -1,9 +1,12 @@
 """Offline DSS reconstruction helpers against a real server result.
 
-The fixture is a backend run of the GHZ-8 flag protocol with 
-p_eval=[1e-5, 1e-4]. The helpers mirror the backend's dss_subset_table
-/ dss_renewal / dss_variance; these tests are what keep the two from
-drifting apart.
+The fixture is a backend run of the GHZ-8 flag protocol with
+p_eval=[1e-5, 1e-4]. The helpers mirror the backend's dss_subset_table and
+dss_variance (and its reference renewal_bracket); dss_attempt_rates has no
+server counterpart since 2026-11-05.
+
+The fixture predates 2026-11-05 and keeps renewal_curve/attempt_rates as the oracle;
+the server no longer sends them, so re-capturing it means recomputing them first.
 """
 
 import json
@@ -121,3 +124,13 @@ def test_attempt_rows_give_the_tables_leading_coefficient(res):
                 term *= _dss_comb_ratio(_dss_counts(sites, s["node"], order), s["weight"], ratios)
             c2 += term
     assert c2 == pytest.approx(res["leading_coefficient_table"], rel=1e-12)
+
+
+def test_renewal_formula_on_a_geometric_toy():
+    # One zero-fault subset (A = 1 at any p): f = 0.1 fail, r = 0.5 repeat,
+    # so p_L = 0.1 / (1 - 0.5) = 0.2 exactly. Moved from the backend.
+    row = {"path": [], "node": "prep", "weight": [0], "q_fail_local": 0.1,
+           "branches": {"prep": 0.5}, "n": 10, "n_discard": 0}
+    res = {"renewal": True, "subset_rates": [row], "partition_order": ["single"],
+           "fault_sites_by_node": {"prep": {"single": 0}}, "p_ref_vec": [1e-3]}
+    assert dss_renewal_p_lower(res, 1e-3) == pytest.approx(0.2, rel=1e-15)
