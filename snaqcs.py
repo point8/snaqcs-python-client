@@ -511,6 +511,12 @@ class SnaqcsClient:
     ) -> dict:
         """Monte Carlo fault sampling for a multi-circuit protocol.
 
+        Runs as a ``protocol_direct_sampler`` job and blocks until it finishes;
+        the server has no synchronous protocol route. Returns the job's result.
+        Raises ``JobFailedError`` with the server's message when the run fails
+        (an invalid protocol, an engine refusal). For long runs, use
+        ``client.jobs.submit_protocol_direct_sampler`` and keep the job handle.
+
         ``capture_failures`` records the faults and per-visit outcomes of failing
         shots as ``failure_records``, each replayable via :meth:`replay`. Off by
         default because it costs work on every shot. ``capture_cap`` bounds how
@@ -531,7 +537,7 @@ class SnaqcsClient:
             body["capture_failures"] = True
         if capture_cap is not None:
             body["capture_cap"] = capture_cap
-        return self._post("/api/v1/sampling/protocol/direct", body)
+        return self.jobs.submit_protocol_direct_sampler(body).wait(poll=0.5).result
 
     def sample_protocol_subset(
         self,
@@ -544,7 +550,11 @@ class SnaqcsClient:
         capture_failures: bool = False,
         capture_cap: Optional[int] = None,
     ) -> dict:
-        """POST /api/v1/sampling/protocol/subset — SUSA weight-stratified DSS sampling.
+        """SUSA weight-stratified DSS sampling.
+
+        Runs as a ``protocol_subset_sampler`` job and blocks until it finishes,
+        like :meth:`sample_protocol`; for long runs keep the job handle from
+        ``client.jobs.submit_protocol_subset_sampler`` instead.
 
         susa_config keys: max_weight (int), L_max (int), eta_max (float),
                           n_max (int, optional), backend (str, optional).
@@ -568,7 +578,7 @@ class SnaqcsClient:
             body["capture_failures"] = True
         if capture_cap is not None:
             body["capture_cap"] = capture_cap
-        return self._post("/api/v1/sampling/protocol/subset", body)
+        return self.jobs.submit_protocol_subset_sampler(body).wait(poll=0.5).result
 
     # ── Fault analysis ────────────────────────────────────────────────────────
 
@@ -1083,9 +1093,8 @@ class Jobs:
     def submit_protocol_direct_sampler(self, request: dict) -> SamplerJob:
         """Submit a direct-sampler job over a protocol graph.
 
-        ``request`` is the same shape ``sample_protocol()`` posts to
-        ``/api/v1/sampling/protocol/direct`` — ``{"config": ..., "noise_config":
-        ..., "num_samples": ..., "seed": ..., "backend": ...}``.
+        ``request`` is the body ``sample_protocol()`` builds: ``{"config": ...,
+        "noise_config": ..., "num_samples": ..., "seed": ..., "backend": ...}``.
         """
         data = self._client._post(
             "/api/v1/sampling/jobs", {"kind": "protocol_direct_sampler", "request": request}
@@ -1131,9 +1140,9 @@ class Jobs:
     ) -> SamplerJob:
         """Submit a SUSA (DSS) weight-stratified sampling job over a protocol graph.
 
-        ``request`` is the same shape ``sample_protocol_subset()`` posts to
-        ``/api/v1/sampling/protocol/subset`` — ``{"config": ..., "noise_config":
-        ..., "num_samples": ..., "seed": ..., "susa_config": {...}}``.
+        ``request`` is the body ``sample_protocol_subset()`` builds: ``{"config":
+        ..., "noise_config": ..., "num_samples": ..., "seed": ..., "susa_config":
+        {...}}``.
         ``susa_config`` requires at minimum ``max_weight`` and ``L_max``
         (``shots_per_task`` is deprecated and ignored by the server).
 

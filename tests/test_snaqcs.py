@@ -459,7 +459,7 @@ def test_jobs_property_is_cached():
 
 def test_submit_protocol_direct_sampler_posts_kind_and_request_then_fetches_snapshot():
     # kind="protocol_direct_sampler" jobs wrap a protocol-graph request (the same
-    # shape sample_protocol() posts to /api/v1/sampling/protocol/direct), not
+    # shape sample_protocol() submits), not
     # the single-circuit sample() shape.
     c = SnaqcsClient(api_key="snaqcs_x")
     request = {"config": {"circuits": {}, "edges": []}, "num_samples": 20}
@@ -1047,3 +1047,51 @@ def test_sampler_job_stream_enforces_overall_timeout_across_sse_and_polling():
             with patch("time.sleep", return_value=None):
                 with pytest.raises(TimeoutError):
                     list(job.stream(timeout=5.0))
+
+
+# ── sample_protocol / sample_protocol_subset run as jobs (server SIMP-08) ─────
+
+
+def _completed(kind, result):
+    return _mock_resp(_job_snapshot(status="completed", kind=kind, result=result))
+
+
+def test_sample_protocol_submits_a_direct_job_and_returns_its_result():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    config = {"circuits": {}, "edges": []}
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "abc"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_completed("protocol_direct_sampler", {"num_samples": 20})):
+        result = c.sample_protocol(config=config, num_samples=20, seed=3, backend="numpy")
+    assert mock_post.call_args[0][0].endswith("/api/v1/sampling/jobs")
+    assert mock_post.call_args[1]["json"] == {
+        "kind": "protocol_direct_sampler",
+        "request": {
+            "config": config,
+            "noise_config": {},
+            "num_samples": 20,
+            "seed": 3,
+            "backend": "numpy",
+        },
+    }
+    assert result == {"num_samples": 20}
+
+
+def test_sample_protocol_subset_submits_a_subset_job_and_returns_its_result():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    body = dict(config={"circuits": {}, "edges": []}, noise_config={}, susa_config={"max_weight": 1})
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "abc"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_completed("protocol_subset_sampler", {"p_logical": 0.1})):
+        result = c.sample_protocol_subset(**body, num_samples=10)
+    sent = mock_post.call_args[1]["json"]
+    assert sent["kind"] == "protocol_subset_sampler"
+    assert sent["request"]["susa_config"] == {"max_weight": 1}
+    assert result == {"p_logical": 0.1}
+
+
+def test_sample_protocol_raises_when_the_job_fails():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    failed = _mock_resp(_job_snapshot(status="failed", error={"message": "does not prepare |0>_L"}))
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "abc"})), \
+         patch.object(c._transport._session, "get", return_value=failed):
+        with pytest.raises(JobFailedError, match="does not prepare"):
+            c.sample_protocol(config={"circuits": {}, "edges": []})

@@ -70,8 +70,6 @@ SERVER_PATHS = {
     "/api/v1/sampling/jobs/{param}/cancel",
     "/api/v1/sampling/jobs/{param}/checkpoint",
     "/api/v1/sampling/jobs/{param}/stream",
-    "/api/v1/sampling/protocol/direct",
-    "/api/v1/sampling/protocol/subset",
     "/api/v1/sampling/workers",
     "/api/v1/sampling/workers/{param}",
     "/api/v1/version",
@@ -93,7 +91,7 @@ def client_paths() -> set[str]:
 
 
 def test_client_literals_were_found():
-    assert len(client_paths()) > 25
+    assert len(client_paths()) > 20
 
 
 def test_every_client_path_is_a_server_route():
