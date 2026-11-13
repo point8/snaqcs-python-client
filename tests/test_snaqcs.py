@@ -263,6 +263,45 @@ def test_sample_passes_decoder_fields_when_set():
     assert body["decoder_config"] == decoder_config
 
 
+def test_decode_detectors_posts_noise_config_body():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    circuit = {"qubits": 1, "layers": []}
+    fns = {"flip": "obs0"}
+    noise = {"p1": 0.001}
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"num_shots": 5})) as mock_post:
+        out = c.decode_detectors(circuit, fns, noise_config=noise, num_shots=5, seed=7, rounds=3)
+    assert out == {"num_shots": 5}
+    assert mock_post.call_args[0][0].endswith("/api/v1/sampling/circuit/detector_decoding")
+    assert mock_post.call_args[1]["json"] == {
+        "circuit": circuit,
+        "classic_functions": fns,
+        "noise_config": noise,
+        "num_shots": 5,
+        "seed": 7,
+        "rounds": 3,
+    }
+
+
+def test_decode_detectors_noise_ref_goes_out_as_refs_and_omits_unset():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    ref = {"asset_type": "noise", "asset_id": 7, "version": 2}
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({})) as mock_post:
+        c.decode_detectors({"qubits": 1, "layers": []}, {"a": "b"}, noise_ref=ref)
+    body = mock_post.call_args[1]["json"]
+    assert body["refs"] == {"noise": ref}
+    assert body["num_shots"] == 100_000
+    for key in ("noise_config", "seed", "rounds", "noise_ref", "correlated_noise_config"):
+        assert key not in body
+
+
+def test_decode_detectors_rejects_both_noise_forms():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    with patch.object(c._transport._session, "post") as mock_post:
+        with pytest.raises(ValueError):
+            c.decode_detectors({}, {}, noise_config={"p1": 0.1}, noise_ref={"name": "x"})
+    mock_post.assert_not_called()
+
+
 # ── Circuits sub-client ───────────────────────────────────────────────────────
 
 def test_circuits_property_returns_circuits_instance():
@@ -449,6 +488,22 @@ def test_submit_circuit_direct_sampler_posts_kind_and_request():
         job = c.jobs.submit_circuit_direct_sampler(request)
     assert mock_post.call_args[1]["json"] == {"kind": "circuit_direct_sampler", "request": request}
     assert mock_get.call_args[0][0].endswith("/api/v1/sampling/jobs/xyz-789")
+    assert isinstance(job, SamplerJob)
+
+
+def test_submit_circuit_detector_decoding_posts_kind_and_request():
+    c = SnaqcsClient(api_key="snaqcs_x")
+    request = {
+        "circuit": {"qubits": 1, "layers": []},
+        "classic_functions": {"any_detector": "b0 == 1"},
+        "noise_config": {"p1": 0.001},
+        "num_shots": 5,
+    }
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "dd-1"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_mock_resp(_job_snapshot())) as mock_get:
+        job = c.jobs.submit_circuit_detector_decoding(request)
+    assert mock_post.call_args[1]["json"] == {"kind": "circuit_detector_decoding", "request": request}
+    assert mock_get.call_args[0][0].endswith("/api/v1/sampling/jobs/dd-1")
     assert isinstance(job, SamplerJob)
 
 

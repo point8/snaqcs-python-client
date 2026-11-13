@@ -460,6 +460,44 @@ class SnaqcsClient:
             body["decoder_config"] = decoder_config
         return self._post("/api/v1/sampling/circuit/direct", body)
 
+    def decode_detectors(
+        self,
+        circuit: dict,
+        check_functions: Dict[str, str],
+        *,
+        noise_config: Optional[dict] = None,
+        noise_ref: Optional[dict] = None,
+        num_shots: int = 100_000,
+        seed: Optional[int] = None,
+        rounds: Optional[int] = None,
+    ) -> dict:
+        """Sample a detector-annotated circuit and decode it with PyMatching.
+
+        Give exactly one noise form: ``noise_config`` inline, or ``noise_ref``
+        (a library reference, sent as ``refs: {"noise": noise_ref}``). Passing
+        both raises ``ValueError``.
+
+        This call is synchronous and the server refuses runs above
+        ``num_shots * num_detectors > 50_000_000`` with a 400. Larger runs go
+        through ``jobs.submit_circuit_detector_decoding``.
+        """
+        if noise_config is not None and noise_ref is not None:
+            raise ValueError("pass either noise_config or noise_ref, not both")
+        body: dict = {
+            "circuit": circuit,
+            "classic_functions": check_functions,
+            "num_shots": num_shots,
+        }
+        if noise_config is not None:
+            body["noise_config"] = noise_config
+        if noise_ref is not None:
+            body["refs"] = {"noise": noise_ref}
+        if seed is not None:
+            body["seed"] = seed
+        if rounds is not None:
+            body["rounds"] = rounds
+        return self._post("/api/v1/sampling/circuit/detector_decoding", body)
+
     def sample_protocol(
         self,
         config: dict,
@@ -1051,6 +1089,20 @@ class Jobs:
         """
         data = self._client._post(
             "/api/v1/sampling/jobs", {"kind": "protocol_direct_sampler", "request": request}
+        )
+        return self.get(data["job_id"])
+
+    def submit_circuit_detector_decoding(self, request: dict) -> SamplerJob:
+        """Submit a detector-decoding job (kind ``circuit_detector_decoding``).
+
+        ``request`` is the body ``decode_detectors()`` posts to
+        ``/api/v1/sampling/circuit/detector_decoding``: ``circuit``,
+        ``classic_functions``, ``noise_config`` or ``refs.noise``, ``num_shots``,
+        ``seed``, ``rounds``. Use it for runs the synchronous call refuses.
+        """
+        data = self._client._post(
+            "/api/v1/sampling/jobs",
+            {"kind": "circuit_detector_decoding", "request": request},
         )
         return self.get(data["job_id"])
 

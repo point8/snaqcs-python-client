@@ -61,6 +61,7 @@ SERVER_PATHS = {
     "/api/v1/protocols/{param}/hydrated",
     "/api/v1/protocols/{param}/owner",
     "/api/v1/protocols/{param}/visibility",
+    "/api/v1/sampling/circuit/detector_decoding",
     "/api/v1/sampling/circuit/direct",
     "/api/v1/sampling/jobs",
     "/api/v1/sampling/jobs/bulk_delete",
