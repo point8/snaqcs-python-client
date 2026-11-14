@@ -1222,6 +1222,12 @@ def dss_p_lower(result: dict, p) -> float:
     ``p`` is a per-partition list (in ``partition_order``) or a scalar s, which
     scales the run's rate ratios (``p_vec = p_ref_vec * s / max(p_ref_vec)``).
     Returns F / (1 - D), conditioned on acceptance as the server's p_lower is.
+
+    This is the LOWER end only. A subset that was never sampled contributes zero
+    to it, so far from the run's p, or when no failure was sampled, it can sit
+    orders of magnitude below p_L (it is exactly 0 in the second case). Use
+    ``dss_bracket`` for a number to quote: it rebuilds the upper end from the
+    same table.
     """
     _dss_require_table(result)
     p_vec = _dss_p_vec(result, p)
@@ -1455,16 +1461,30 @@ def _dss_unsampled_mass(counts, sampled, p_vec, budget):
     return mass
 
 
-def _dss_attempt_fold(result, p_vec):
-    """One attempt's fold: (p_fail, delta, p_disc, var_lo, var_hi, var_disc, cov_fd, terms)."""
+#: The level the upper-confidence mass is built for (snaqcs-susa's kConfidenceZ).
+_DSS_Z = 3.0
+
+
+def _dss_fold(result, p_vec, one_attempt):
+    """The engine's fold over the subset table at ``p_vec``.
+
+    Returns ``([p_fail, cutoff, p_disc, var_lo, var_hi, var_disc, cov_fd, conf], terms)``.
+    ``cutoff`` is the unexplored mass and ``conf`` the upper-confidence mass of the
+    sampled subsets; the server's delta is their sum. ``conf`` is the largest
+    single centre shift in the tree (independent subsets: the shifts do not add),
+    so it combines by max where everything else adds. With ``one_attempt`` a
+    return to the start node is booked as a discard (the repeat probability R)
+    instead of recursed: the fold over one attempt of a renewal protocol.
+    """
     sites, order = result["fault_sites_by_node"], result["partition_order"]
     t_ft = int(result["t_ft"])
     start = next(r["node"] for r in result["subset_rates"] if not r["path"])
+    repeat_to = start if one_attempt else None
     index = _dss_index(result["subset_rates"])
     terms = []
 
     def circuit(key, node, cum_above, mult):
-        out = [0.0] * 7
+        out = [0.0] * 8
         rows_here = index.get((key, node), [])
         counts = _dss_counts(sites, node, order)
         for r in rows_here:
@@ -1474,6 +1494,7 @@ def _dss_attempt_fold(result, p_vec):
                 out[i] += A * wf[i]
             for i in range(3, 7):
                 out[i] += A * A * wf[i]
+            out[7] = max(out[7], A * wf[7])
         out[1] += _dss_unsampled_mass(
             counts, [r["weight"] for r in rows_here], p_vec, t_ft - cum_above
         )
@@ -1491,17 +1512,18 @@ def _dss_attempt_fold(result, p_vec):
         below = cum_above + sum(r["weight"])
         sub = {}
         for a, c in enumerate(cats):
-            if c["kind"] == "succ" and c["child"] != start:
+            if c["kind"] == "succ" and c["child"] != repeat_to:
                 sub[a] = circuit(own, c["child"], below, mult * (gamma[a][a] + pi[a] * pi[a]))
-        out = [0.0] * 7
+        out = [0.0] * 8
         DL, DU, DD = [0.0] * K, [0.0] * K, [0.0] * K
         for a, c in enumerate(cats):
             L = X = D = 0.0
             if c["kind"] == "succ":
-                if c["child"] == start:
+                if c["child"] == repeat_to:
                     D = 1.0
                 else:
                     L, X, D = sub[a][0], sub[a][1], sub[a][2]
+                    out[7] = max(out[7], pi[a] * sub[a][7])
             elif c["kind"] == "fail":
                 L = 1.0
             elif c["kind"] in ("unr", "trunc"):
@@ -1512,6 +1534,12 @@ def _dss_attempt_fold(result, p_vec):
             out[0] += pi[a] * L
             out[1] += pi[a] * X
             out[2] += pi[a] * D
+        # Wilson's centre shift (z^2/n)(midpoint - mean) of the values DU, capped
+        # where the mean would pass the largest one; none on the fault-free path.
+        if K >= 2 and not r["fault_free"]:
+            lo, hi, mean = min(DU), max(DU), out[0] + out[1]
+            own_shift = min(_DSS_Z * _DSS_Z / r["n"] * (0.5 * (lo + hi) - mean), hi - mean)
+            out[7] = max(out[7], own_shift)
 
         def quad(Dv, Ev):
             s = 0.0
@@ -1531,35 +1559,95 @@ def _dss_attempt_fold(result, p_vec):
     return circuit((), start, 0, 1.0), terms
 
 
-def dss_renewal_bracket(result: dict, p) -> dict:
-    """The certified renewal bracket at any p (repeat-until-success only).
+def _dss_conditioned(fold):
+    """The fold's F and D as p_L = F / (1 - D), the server's ``_conditioned``.
 
-    Keys: p, p_vec, p_lower, p_upper, sigma_L, sigma_U, p_upper_certified, F, R, U
-    and top_sigma_rows. M is read from
-    ``result["renewal_max_attempts"]``: the lower end is a lower bound on the
-    protocol as capped by its max_rounds.
+    The upper-side mass T (cutoff plus confidence mass) may all fail or all be
+    discarded; the upper end is the larger of the two. Returns
+    ``(lower, sigma_lower, upper, sigma_upper)``; sigmas by the delta method.
     """
-    _dss_require_renewal(result)
-    _dss_require_table(result)
-    p_vec = _dss_p_vec(result, p)
-    fold, terms = _dss_attempt_fold(result, p_vec)
-    F, U, R, var_F, var_U, var_R, cov = fold
-    sF, sU, sD = math.sqrt(max(var_F, 0.0)), math.sqrt(max(var_U, 0.0)), math.sqrt(max(var_R, 0.0))
-    acc = max(1e-300, 1.0 - R)
+    F, cutoff, D, var_F, var_U, var_D, cov, conf = fold
+    T = cutoff + conf
+    sF, sU, sD = (math.sqrt(max(v, 0.0)) for v in (var_F, var_U, var_D))
+    acc = max(1e-300, 1.0 - D)
 
     def sigma(num, s_num, den):
         var = s_num**2 / den**2 + num**2 * sD**2 / den**4 + 2 * num * cov / den**3
         return math.sqrt(max(var, 0.0))
 
     lower, s_lower = F / acc, sigma(F, sF, acc)
-    up_fail = (F + U) / acc
-    shrunk = acc - U
+    up_fail = (F + T) / acc
+    shrunk = acc - T
     up_discard = F / shrunk if shrunk > 0 else 1.0
     if up_fail >= up_discard:
-        upper, s_upper = up_fail, sigma(F + U, sU, acc)
+        upper, s_upper = up_fail, sigma(F + T, sU, acc)
     else:
         upper, s_upper = up_discard, sigma(F, sU, max(shrunk, 1e-300))
-    upper = min(1.0, upper)
+    return lower, s_lower, min(1.0, upper), s_upper
+
+
+def dss_bracket(result: dict, p) -> dict:
+    """The whole DSS bracket at any noise strength, from the subset table.
+
+    This is what to use for a p_L at another p: the lower end AND the upper end,
+    rebuilt from the same rows, so the subsets the run never sampled are counted
+    (in ``delta``) instead of silently contributing zero as in ``dss_p_lower``.
+    It reproduces the server's ``p_curve`` point at that p; no extra shots.
+
+    ``p`` is a per-partition list (in ``partition_order``) or a scalar s, which
+    scales the run's rate ratios. Keys:
+
+    - ``p_lower``, ``sigma_L``: the lower end and its standard error.
+    - ``p_upper = p_lower + delta``, ``sigma_U``.
+    - ``p_upper_3sigma = p_upper + 3 sigma_U``: the bound to quote.
+    - ``delta``: the mass of everything not sampled (unsampled subsets,
+      unrealized successors, truncated walks) plus ``delta_confidence``, an
+      upper-confidence mass for what was sampled (Wilson's centre shift at
+      z = 3; it falls as 1/shots).
+    - ``p_logical``: the bracket midpoint. ``p``, ``p_vec``.
+
+    With a discard node everything is conditioned on acceptance, as the server's
+    numbers are. Far from the run's p the bracket is honest but wide: the run
+    chose its subsets for p_ref, and at a larger p the unsampled ones dominate.
+    """
+    _dss_require_table(result)
+    if "t_ft" not in result:
+        raise ValueError("this result has no t_ft: it predates the subset-rate bracket")
+    p_vec = _dss_p_vec(result, p)
+    fold, _ = _dss_fold(result, p_vec, one_attempt=False)
+    lower, s_lower, upper, s_upper = _dss_conditioned(fold)
+    delta = upper - lower
+    total = fold[1] + fold[7]
+    return {
+        "p": max(p_vec),
+        "p_vec": p_vec,
+        "p_logical": (lower + upper) / 2,
+        "p_lower": max(0.0, lower),
+        "p_upper": upper,
+        "sigma_L": s_lower,
+        "sigma_U": s_upper,
+        "delta": delta,
+        "delta_confidence": delta * fold[7] / total if total > 0 else 0.0,
+        "p_upper_3sigma": upper + 3.0 * s_upper,
+    }
+
+
+def dss_renewal_bracket(result: dict, p) -> dict:
+    """The renewal bracket at any p (repeat-until-success only).
+
+    Keys: p, p_vec, p_lower, p_upper, sigma_L, sigma_U, p_upper_3sigma, F, R, U
+    and top_sigma_rows. U is one attempt's upper-side mass: unexplored plus the
+    upper-confidence mass of its sampled subsets. M is read from
+    ``result["renewal_max_attempts"]``: the lower end is a lower bound on the
+    protocol as capped by its max_rounds.
+    """
+    _dss_require_renewal(result)
+    _dss_require_table(result)
+    p_vec = _dss_p_vec(result, p)
+    fold, terms = _dss_fold(result, p_vec, one_attempt=True)
+    F, R, var_F = fold[0], fold[2], fold[3]
+    U = fold[1] + fold[7]
+    lower, s_lower, upper, s_upper = _dss_conditioned(fold)
     factor = 1.0 - R ** int(result["renewal_max_attempts"])
     top = sorted(terms, key=lambda t: t[1], reverse=True)[:5]
     return {
@@ -1569,7 +1657,7 @@ def dss_renewal_bracket(result: dict, p) -> dict:
         "p_upper": upper,
         "sigma_L": s_lower * factor,
         "sigma_U": s_upper,
-        "p_upper_certified": upper + 3.0 * s_upper,
+        "p_upper_3sigma": upper + 3.0 * s_upper,
         "F": F,
         "R": R,
         "U": U,

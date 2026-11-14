@@ -1,6 +1,6 @@
 [project]
 name = "snaqcs-python-client"
-version = "0.3.4"
+version = "0.3.5"
 description = "Python client for the SNAQCS quantum error correction API"
 readme = "README.md"
 authors = [
