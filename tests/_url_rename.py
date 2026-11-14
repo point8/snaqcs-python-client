@@ -63,7 +63,6 @@ RENAMES: dict[str, str] = {
     "/api/propagate": "/api/v1/analysis/circuit/propagate",
     "/api/multiple_faults": "/api/v1/analysis/circuit/propagate_multi",
     "/api/enumerate_faults": "/api/v1/analysis/circuit/enumerate_faults",
-    "/api/enumerate_pauli_faults": "/api/v1/analysis/circuit/enumerate_pauli_faults",
     "/api/circuit/valid_fault_ticks": "/api/v1/analysis/circuit/valid_fault_ticks",
     "/api/wilson_ci": "/api/v1/analysis/wilson_ci",
     "/api/protocol/propagate": "/api/v1/analysis/protocol/propagate",

@@ -17,7 +17,6 @@ SERVER_PATHS = {
     "/api/v1/admin/library/gc",
     "/api/v1/admin/library/gc/purge",
     "/api/v1/analysis/circuit/enumerate_faults",
-    "/api/v1/analysis/circuit/enumerate_pauli_faults",
     "/api/v1/analysis/circuit/propagate",
     "/api/v1/analysis/circuit/propagate_multi",
     "/api/v1/analysis/circuit/valid_fault_ticks",

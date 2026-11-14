@@ -246,29 +246,6 @@ class TestEnumerateFaults:
             assert "logErr" in fault["checks"]
 
 
-# ── Fault enumeration (enumerate_pauli_faults) ────────────────────────────────
-
-class TestEnumeratePauliFaults:
-    def test_returns_expected_fields(self, client, steane_circuit):
-        result = client.enumerate_pauli_faults(circuit=steane_circuit)
-        assert "total_faults" in result
-        assert "faults" in result
-
-    def test_each_fault_has_required_fields(self, client, steane_circuit):
-        result = client.enumerate_pauli_faults(circuit=steane_circuit)
-        for fault in result["faults"]:
-            assert "location" in fault
-            assert "qubit" in fault
-            assert "pauli" in fault
-            assert fault["pauli"] in ("X", "Y", "Z")
-
-    def test_backward_compat_alias_works(self, client, steane_circuit):
-        """enumerate_single_faults alias must produce the same result as enumerate_pauli_faults."""
-        result = client.enumerate_single_faults(circuit=steane_circuit)
-        assert "total_faults" in result
-        assert "faults" in result
-
-
 # ── API path contract against the live schema ─────────────────────────────────
 
 def test_every_client_path_is_served_by_the_live_server(client):

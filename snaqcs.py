@@ -610,25 +610,6 @@ class SnaqcsClient:
             "return_intermediate": return_intermediate,
         })
 
-    def enumerate_pauli_faults(
-        self,
-        circuit: dict,
-        code_config: Optional[dict] = None,
-        fault_types: Optional[list] = None,
-        include_idle: bool = False,
-    ) -> dict:
-        """Enumerate every single-qubit Pauli error in the circuit.
-        """
-        return self._post("/api/v1/analysis/circuit/enumerate_pauli_faults", {
-            "circuit": circuit,
-            "code_config": code_config,
-            "fault_types": fault_types or ["X", "Y", "Z"],
-            "include_idle": include_idle,
-        })
-
-    # Backward-compat alias (one-release deprecation; remove next major).
-    enumerate_single_faults = enumerate_pauli_faults
-
     def wilson_ci(
         self,
         num_success: int,

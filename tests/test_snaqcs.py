@@ -389,48 +389,6 @@ def test_circuits_export_qasm_connection_error_raises_server_unavailable_error()
             c.circuits.export_qasm("my_circ")
 
 
-# ── enumerate_pauli_faults ────────────────────────────────────────────────────
-
-ENUMERATE_PAULI_PAYLOAD = {
-    "total_faults": 3,
-    "faults": [
-        {"location": 0, "qubit": 0, "pauli": "X"},
-        {"location": 0, "qubit": 0, "pauli": "Y"},
-        {"location": 0, "qubit": 0, "pauli": "Z"},
-    ],
-}
-
-
-def test_enumerate_pauli_faults_posts_to_correct_url():
-    c = SnaqcsClient(api_key="snaqcs_x")
-    circuit = {"qubits": 3, "layers": []}
-    with patch.object(c._transport._session, "post", return_value=_mock_resp(ENUMERATE_PAULI_PAYLOAD)) as mock_post:
-        result = c.enumerate_pauli_faults(circuit=circuit)
-    url = mock_post.call_args[0][0]
-    assert url.endswith("/api/v1/analysis/circuit/enumerate_pauli_faults")
-    assert result["total_faults"] == 3
-
-
-def test_enumerate_pauli_faults_default_fault_types():
-    c = SnaqcsClient(api_key="snaqcs_x")
-    circuit = {"qubits": 3, "layers": []}
-    with patch.object(c._transport._session, "post", return_value=_mock_resp(ENUMERATE_PAULI_PAYLOAD)) as mock_post:
-        c.enumerate_pauli_faults(circuit=circuit)
-    body = mock_post.call_args[1]["json"]
-    assert body["fault_types"] == ["X", "Y", "Z"]
-
-
-def test_enumerate_single_faults_alias_posts_to_correct_url():
-    """Backward-compat alias must still reach /api/v1/analysis/circuit/enumerate_pauli_faults."""
-    c = SnaqcsClient(api_key="snaqcs_x")
-    circuit = {"qubits": 3, "layers": []}
-    with patch.object(c._transport._session, "post", return_value=_mock_resp(ENUMERATE_PAULI_PAYLOAD)) as mock_post:
-        result = c.enumerate_single_faults(circuit=circuit)
-    url = mock_post.call_args[0][0]
-    assert url.endswith("/api/v1/analysis/circuit/enumerate_pauli_faults")
-    assert result["total_faults"] == 3
-
-
 # ── Jobs sub-client ───────────────────────────────────────────────────────────
 
 def _job_snapshot(status="queued", **overrides):
