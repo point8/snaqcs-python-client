@@ -214,3 +214,23 @@ def test_renewal_formula_on_a_geometric_toy():
     res = {"renewal": True, "subset_rates": [row], "partition_order": ["single"],
            "fault_sites_by_node": {"prep": {"single": 0}}, "p_ref_vec": [1e-3]}
     assert dss_renewal_p_lower(res, 1e-3) == pytest.approx(0.2, rel=1e-15)
+
+
+def test_rebuilds_warn_when_the_server_acceptance_was_census_exact(res):
+    # snaqcs 2026-11-17: a postselected run's acceptance can take its low-weight
+    # discard rate from the census; the table holds only the sampled rows.
+    exact = {**res, "acceptance_low_weight": "exact"}
+    pt = res["p_curve"][-1]
+    with pytest.warns(UserWarning, match="census-exact low-weight discard"):
+        dss_bracket(exact, pt["p_vec"])
+    with pytest.warns(UserWarning, match="census-exact low-weight discard"):
+        dss_p_lower(exact, pt["p_vec"])
+
+
+@pytest.mark.parametrize("flag", [None, "sampled"])
+def test_rebuilds_stay_quiet_otherwise(res, flag, recwarn):
+    r = dict(res) if flag is None else {**res, "acceptance_low_weight": flag}
+    pt = res["p_curve"][-1]
+    dss_bracket(r, pt["p_vec"])
+    dss_p_lower(r, pt["p_vec"])
+    assert not [w for w in recwarn if "census-exact" in str(w.message)]

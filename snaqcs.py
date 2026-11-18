@@ -5,6 +5,7 @@ import json
 import math
 import os
 import time
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Dict, Iterator, Optional
@@ -1216,6 +1217,20 @@ def _dss_require_table(result: dict, key: str = "subset_rates") -> None:
         )
 
 
+def _warn_if_exact_acceptance(result: dict, fn: str) -> None:
+    """The server's acceptance can take its low-weight discard rate exactly from the
+    census (``acceptance_low_weight == "exact"``, snaqcs 2026-11-17); the subset table
+    holds only the sampled rows, so an offline rebuild gives the sampled D there."""
+    if result.get("acceptance_low_weight") == "exact":
+        warnings.warn(
+            f"{fn}: this result's acceptance uses the census-exact low-weight discard "
+            "rate, which the subset table does not hold; the rebuild uses the sampled "
+            "discard rate, so its acceptance and conditioned p_L can differ from the "
+            "server's p_curve.",
+            stacklevel=3,
+        )
+
+
 def dss_p_lower(result: dict, p) -> float:
     """The server's lower end p_lower at any noise strength, from the subset table.
 
@@ -1228,8 +1243,13 @@ def dss_p_lower(result: dict, p) -> float:
     orders of magnitude below p_L (it is exactly 0 in the second case). Use
     ``dss_bracket`` for a number to quote: it rebuilds the upper end from the
     same table.
+
+    For a result with ``acceptance_low_weight == "exact"`` it warns: the server
+    took that run's low-weight discard rate from the census, the table holds the
+    sampled one.
     """
     _dss_require_table(result)
+    _warn_if_exact_acceptance(result, "dss_p_lower")
     p_vec = _dss_p_vec(result, p)
     sites, order = result["fault_sites_by_node"], result["partition_order"]
     index = _dss_index(result["subset_rates"])
@@ -1592,7 +1612,11 @@ def dss_bracket(result: dict, p) -> dict:
     This is what to use for a p_L at another p: the lower end AND the upper end,
     rebuilt from the same rows, so the subsets the run never sampled are counted
     (in ``delta``) instead of silently contributing zero as in ``dss_p_lower``.
-    It reproduces the server's ``p_curve`` point at that p; no extra shots.
+    It reproduces the server's ``p_curve`` point at that p; no extra shots. The
+    exception is a postselected run with ``acceptance_low_weight == "exact"``:
+    the server took its low-weight discard rate from the census, the table holds
+    only the sampled one, so this rebuild uses the sampled discard rate and
+    warns.
 
     ``p`` is a per-partition list (in ``partition_order``) or a scalar s, which
     scales the run's rate ratios. Keys:
@@ -1611,6 +1635,7 @@ def dss_bracket(result: dict, p) -> dict:
     chose its subsets for p_ref, and at a larger p the unsampled ones dominate.
     """
     _dss_require_table(result)
+    _warn_if_exact_acceptance(result, "dss_bracket")
     if "t_ft" not in result:
         raise ValueError("this result has no t_ft: it predates the subset-rate bracket")
     p_vec = _dss_p_vec(result, p)
