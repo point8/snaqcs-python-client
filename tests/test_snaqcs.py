@@ -125,6 +125,16 @@ def test_decode_batch_returns_list():
     assert all(isinstance(r, DecoderResult) for r in results)
 
 
+def test_decode_sends_listed_logicals_as_lists():
+    # k > 1: logical_x/logical_z are lists paired by index; the body carries them as given.
+    c = SnaqcsClient(api_key="snaqcs_x")
+    lx, lz = ["XXII", "XIXI"], ["ZIZI", "ZZII"]
+    with patch.object(c._transport._session, "post", return_value=_mock_resp(DECODE_PAYLOAD)) as post:
+        c.decode("XIII", stabilizers=["+XXXX", "+ZZZZ"], logical_x=lx, logical_z=lz)
+    body = post.call_args.kwargs["json"]
+    assert body["logical_x"] == lx and body["logical_z"] == lz
+
+
 # ── Decoder helper ────────────────────────────────────────────────────────────
 
 def test_decoder_factory_returns_bound_decoder():

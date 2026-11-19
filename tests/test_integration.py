@@ -139,6 +139,20 @@ class TestDecode:
         assert isinstance(result, DecoderResult)
         assert result.is_correctable is True
 
+    def test_k2_judges_only_the_listed_logicals(self, client, steane_stabilizers):
+        # Two Steane blocks, [[14,2,3]]. A logical X on block 2 fails when both pairs
+        # are listed and passes when only block 1's pair is listed.
+        stabilizers = [s + "I" * 7 for s in steane_stabilizers] + [
+            "+" + "I" * 7 + s[1:] for s in steane_stabilizers
+        ]
+        lx = ["XXXXXXX" + "I" * 7, "I" * 7 + "XXXXXXX"]
+        lz = ["ZZZZZZZ" + "I" * 7, "I" * 7 + "ZZZZZZZ"]
+        error = "I" * 7 + "XXXIIII"
+        both = client.decoder(stabilizers, num_qubits=14, logical_x=lx, logical_z=lz)
+        first = client.decoder(stabilizers, num_qubits=14, logical_x=lx[:1], logical_z=lz[:1])
+        assert both.decode(error).is_correctable is False
+        assert first.decode(error).is_correctable is True
+
 
 # ── Propagate ─────────────────────────────────────────────────────────────────
 

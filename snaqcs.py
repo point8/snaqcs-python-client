@@ -8,12 +8,16 @@ import time
 import warnings
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterator, List, Optional, Union
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+
+# One logical operator, or a list of them paired by index (k > 1). A decoder
+# fails a residual that flips any listed logical; unlisted logicals are not judged.
+Logicals = Union[str, List[str], None]
 
 class AuthenticationError(Exception):
     """Raised when the API key is missing, invalid, or revoked."""
@@ -196,6 +200,13 @@ class Decoder:
         )
         result = decoder.decode("XIIII")
         results = decoder.decode_batch(["XIIII", "IXIII", "IIXII"])
+
+    For a code with several logical qubits, pass lists paired by index. A residual
+    fails if it flips any listed logical; list a single pair to get the rate for
+    that logical alone::
+
+        both = client.decoder(stabilizers, logical_x=[lx1, lx2], logical_z=[lz1, lz2])
+        first = client.decoder(stabilizers, logical_x=[lx1], logical_z=[lz1])
     """
 
     def __init__(
@@ -203,8 +214,8 @@ class Decoder:
         client: "SnaqcsClient",
         stabilizers: list,
         num_qubits: Optional[int],
-        logical_x: Optional[str],
-        logical_z: Optional[str],
+        logical_x: Logicals,
+        logical_z: Logicals,
     ) -> None:
         self._client = client
         self.stabilizers = stabilizers
@@ -310,10 +321,13 @@ class SnaqcsClient:
         self,
         stabilizers: list,
         num_qubits: Optional[int] = None,
-        logical_x: Optional[str] = None,
-        logical_z: Optional[str] = None,
+        logical_x: Logicals = None,
+        logical_z: Logicals = None,
     ) -> Decoder:
-        """Return a code-specific Decoder that reuses this client's session."""
+        """Return a code-specific Decoder that reuses this client's session.
+
+        ``logical_x``/``logical_z`` take one operator or a list paired by index (k > 1).
+        """
         return Decoder(self, stabilizers, num_qubits, logical_x, logical_z)
 
     def decode(
@@ -321,8 +335,8 @@ class SnaqcsClient:
         error: str,
         stabilizers: list,
         num_qubits: Optional[int] = None,
-        logical_x: Optional[str] = None,
-        logical_z: Optional[str] = None,
+        logical_x: Logicals = None,
+        logical_z: Logicals = None,
     ) -> DecoderResult:
         """Decode a single Pauli error."""
         data = self._post("/api/v1/decoder/decode", {
@@ -339,8 +353,8 @@ class SnaqcsClient:
         errors: list,
         stabilizers: list,
         num_qubits: Optional[int] = None,
-        logical_x: Optional[str] = None,
-        logical_z: Optional[str] = None,
+        logical_x: Logicals = None,
+        logical_z: Logicals = None,
     ) -> list:
         """Decode multiple Pauli errors in a single API call."""
         data = self._post("/api/v1/decoder/decode_batch", {
@@ -356,8 +370,8 @@ class SnaqcsClient:
         self,
         stabilizers: list,
         num_qubits: Optional[int] = None,
-        logical_x: Optional[str] = None,
-        logical_z: Optional[str] = None,
+        logical_x: Logicals = None,
+        logical_z: Logicals = None,
     ) -> LookupTableInfo:
         data = self._post("/api/v1/decoder/info", {
             "stabilizers": stabilizers,
