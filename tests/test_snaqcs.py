@@ -1063,3 +1063,13 @@ def test_sample_protocol_raises_when_the_job_fails():
          patch.object(c._transport._session, "get", return_value=failed):
         with pytest.raises(JobFailedError, match="does not prepare"):
             c.sample_protocol(config={"circuits": {}, "edges": []})
+
+
+def test_sample_protocol_passes_target_state_through():
+    """PH-01 Fix M: the declared target rides in the config, untouched."""
+    c = SnaqcsClient(api_key="snaqcs_x")
+    config = {"circuits": {}, "edges": [], "target_state": ["+X0"]}
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({"job_id": "abc"})) as mock_post, \
+         patch.object(c._transport._session, "get", return_value=_completed("protocol_direct_sampler", {"num_samples": 1})):
+        c.sample_protocol(config=config, num_samples=1)
+    assert mock_post.call_args[1]["json"]["request"]["config"]["target_state"] == ["+X0"]

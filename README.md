@@ -41,6 +41,36 @@ without a key — the dev server runs with authentication disabled. `client =
 SnaqcsClient()` will default to `http://localhost:6090` when no `SNAQCS_API_URL` is
 set.
 
+## Declaring the target state
+
+A protocol judged by a decoder says which logical state it prepares in
+`target_state`, part of the protocol config. Each entry is a signed logical of
+the code: `Z<i>` is `logical_z[i]`, `X<i>` is `logical_x[i]`.
+
+| State | `target_state` |
+|---|---|
+| \|0>_L | unset (the default), or `["+Z0"]` |
+| \|1>_L | `["-Z0"]` |
+| \|+>_L | `["+X0"]` |
+| \|->_L | `["-X0"]` |
+| logical Bell pair, ZZ parity | `["+Z0Z1"]` |
+
+```python
+config = {**protocol, "target_state": ["+X0"]}
+result = client.sample_protocol(config=config, noise_config=noise, num_samples=10_000)
+result["verdict_target"]
+# {'target_state': ['+X0'], 'readout_basis': 'X', 'error_sector_judged': 'Z'}
+```
+
+The readout backends (tableau, clifft, SUSA) read the data out in the target's
+basis. A protocol that does not prepare the declared state is refused before
+sampling.
+
+**Comparing bases.** A Z-basis target (`|0>`, `|1>`) gives the rate of logical X
+flips. An X-basis target (`|+>`, `|->`) gives the rate of logical Z flips. They
+are two different quantities from two runs, not one p_L. Their mean is the
+basis-averaged rate, and their sum bounds the rate of any logical error.
+
 ## Development
 
 ```bash
