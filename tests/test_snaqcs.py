@@ -1073,3 +1073,13 @@ def test_sample_protocol_passes_target_state_through():
          patch.object(c._transport._session, "get", return_value=_completed("protocol_direct_sampler", {"num_samples": 1})):
         c.sample_protocol(config=config, num_samples=1)
     assert mock_post.call_args[1]["json"]["request"]["config"]["target_state"] == ["+X0"]
+
+
+def test_sample_sends_backend_only_when_set():
+    """PH-18 Fix M: clifft is chosen explicitly; omitted, the server keeps numpy."""
+    c = SnaqcsClient(api_key="snaqcs_x")
+    with patch.object(c._transport._session, "post", return_value=_mock_resp({})) as mock_post:
+        c.sample(circuit={"qubits": 1, "layers": []}, check_functions={"a": "m0"})
+        assert "backend" not in mock_post.call_args[1]["json"]
+        c.sample(circuit={"qubits": 1, "layers": []}, check_functions={"a": "m0"}, backend="clifft")
+        assert mock_post.call_args[1]["json"]["backend"] == "clifft"

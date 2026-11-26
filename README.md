@@ -71,6 +71,20 @@ flips. An X-basis target (`|+>`, `|->`) gives the rate of logical Z flips. They
 are two different quantities from two runs, not one p_L. Their mean is the
 basis-averaged rate, and their sum bounds the rate of any logical error.
 
+## Non-Clifford circuits on clifft
+
+`client.sample(...)` runs on the Pauli frame unless you pass `backend="clifft"`.
+clifft simulates non-Clifford circuits (T, CCX) exactly. `m_i` still means a
+flip: the outcome XOR the noiseless outcome, which the server certifies exactly
+for every bit a check reads (`reference_check` in the result). A check that reads
+`final_error` or `weight`, the decoder, correlated noise and sample details are
+refused on clifft, and the weight histogram comes back as `None`. Each check
+carries a 3-sigma Wilson interval (`ci_low`, `ci_high`), and the result names
+the `seed` it used, so a run can be replayed.
+
+This is direct Monte Carlo (at most 1e6 shots), so p_L below about 1e-5 is out
+of reach here; for low p use the subset sampler (SUSA).
+
 ## Development
 
 ```bash

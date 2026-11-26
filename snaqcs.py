@@ -458,8 +458,13 @@ class SnaqcsClient:
         return_sample_details: bool = False,
         decoder_backend: Optional[str] = None,
         decoder_config: Optional[dict] = None,
+        backend: Optional[str] = None,
     ) -> dict:
         """Monte Carlo fault sampling for a single circuit with depolarizing noise.
+
+        ``backend="clifft"`` samples a non-Clifford circuit (T, CCX) exactly; the
+        check functions then read measurement flips only (no ``final_error``, no
+        ``weight``, no decoder). Omitted, the server uses the Pauli frame.
         """
         body: dict = {
             "circuit": circuit,
@@ -473,6 +478,8 @@ class SnaqcsClient:
             body["decoder_backend"] = decoder_backend
         if decoder_config is not None:
             body["decoder_config"] = decoder_config
+        if backend is not None:
+            body["backend"] = backend
         return self._post("/api/v1/sampling/circuit/direct", body)
 
     def decode_detectors(
