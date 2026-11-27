@@ -1183,8 +1183,8 @@ class Jobs:
 # ── Offline DSS reconstruction ───────────────────────────────────────────────
 #
 # Pure-Python helpers over a subset-sampler (DSS) result dict. They mirror the
-# server's dss_subset_table and dss_variance modules and its reference
-# dss_renewal.renewal_bracket; dss_attempt_rates is client-only. 
+# server's dss_subset_table and dss_variance modules and its test oracle
+# backend/tests/_dss_oracle.renewal_bracket; dss_attempt_rates is client-only.
 # tests/test_dss_reconstruct.py holds
 # them to a server result at rel 1e-9.
 # Heussen et al. 2024, Eqs. (2)/(4):

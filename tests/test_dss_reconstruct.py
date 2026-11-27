@@ -2,8 +2,8 @@
 
 The fixture is a backend run of the GHZ-8 flag protocol with
 p_eval=[1e-5, 1e-4]. The helpers mirror the backend's dss_subset_table and
-dss_variance (and its reference renewal_bracket); dss_attempt_rates has no
-server counterpart since 2026-11-05.
+dss_variance, and its test oracle backend/tests/_dss_oracle.renewal_bracket;
+dss_attempt_rates has no server counterpart since 2026-11-05.
 
 The fixture predates 2026-11-05 and keeps renewal_curve/attempt_rates as the oracle;
 the server no longer sends them, so re-capturing it means recomputing them first.
