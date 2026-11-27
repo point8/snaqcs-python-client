@@ -234,3 +234,23 @@ def test_rebuilds_stay_quiet_otherwise(res, flag, recwarn):
     dss_bracket(r, pt["p_vec"])
     dss_p_lower(r, pt["p_vec"])
     assert not [w for w in recwarn if "census-exact" in str(w.message)]
+
+
+def test_postselected_bracket_matches_server():
+    """A postselected run (the snaqcs two-round discard toy, t_ft = 0, eru, 2000 shots,
+    seed 3; captured 2026-11-26 from snaqcs on snaqcs-susa 0.8.13). One subset came out
+    all discarded, so D's confidence masses move the conditional bracket; the client's
+    rebuild must move it the same way."""
+    res = json.loads((FIXTURES / "discard_dss_result.json").read_text())
+    assert any(r["n"] and r["n_discard"] == r["n"] for r in res["subset_rates"])
+    assert res["p_curve"]
+    for pt in res["p_curve"]:
+        off = dss_bracket(res, pt["p_vec"])
+        for k in BRACKET_KEYS:
+            assert off[k] == pytest.approx(pt[k], rel=1e-9, abs=1e-15), k
+    # Not vacuous: without D's masses the rebuild would differ.
+    from snaqcs import _dss_conditioned, _dss_fold
+
+    fold, _ = _dss_fold(res, res["p_curve"][0]["p_vec"], one_attempt=False)
+    assert fold[8] + fold[9] > 0
+    assert _dss_conditioned(fold, discard_masses=False) != _dss_conditioned(fold)

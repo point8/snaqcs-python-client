@@ -1,0 +1,715 @@
+{
+ "acceptance_fraction": 0.9621928399104566,
+ "acceptance_low_weight": "sampled",
+ "acceptance_lower": 0.9595123430109969,
+ "acceptance_upper": 0.9644591088414318,
+ "avg_rounds": 1.980786190303938,
+ "config_hash": null,
+ "delta": 0.00024308771425366908,
+ "delta_confidence": 0.00024306293104397683,
+ "eta": 0.0003139238049662091,
+ "failure_records": [],
+ "failure_records_dropped": 0,
+ "failure_records_p_lower_share": 0.0,
+ "fault_sites_by_node": {
+  "a": {
+   "init": 3
+  },
+  "b": {
+   "init": 3
+  }
+ },
+ "ft_proof_configs_checked": 0,
+ "leading_coefficient": 0.6388095218930965,
+ "leading_coefficient_sigma": 3556595090391835.5,
+ "leading_coefficient_table": 0.6388095238095238,
+ "leading_order": 3,
+ "n_truncated": 0,
+ "num_circuits_in_protocol": 2,
+ "num_correctable": 1937,
+ "num_discarded": 1345,
+ "num_failures_by_weight": {},
+ "num_fault_sites": 6,
+ "num_samples": 2000,
+ "num_uncorrectable": 63,
+ "p_curve": [
+  {
+   "delta": 2.455876567972707e-05,
+   "delta_confidence": 2.4558763258105503e-05,
+   "p": 0.001,
+   "p_logical": 1.2280022184195434e-05,
+   "p_lower": 6.393443318978654e-10,
+   "p_lower_3sigma": 0.0,
+   "p_upper": 2.455940502405897e-05,
+   "p_upper_3sigma": 3.521775936058742e-05,
+   "p_vec": [
+    0.001
+   ],
+   "sigma_L": 3.5527207144685497e-06,
+   "sigma_U": 3.552784778842818e-06
+  },
+  {
+   "delta": 7.350895837472106e-05,
+   "delta_confidence": 7.35087612140411e-05,
+   "p": 0.003,
+   "p_logical": 3.677177036116029e-05,
+   "p_lower": 1.7291173799757906e-08,
+   "p_lower_3sigma": 0.0,
+   "p_upper": 7.352624954852082e-05,
+   "p_upper_3sigma": 0.00010544687865875676,
+   "p_vec": [
+    0.003
+   ],
+   "sigma_L": 1.0639626446142052e-05,
+   "sigma_U": 1.064020970341198e-05
+  },
+  {
+   "delta": 0.00024308771425366908,
+   "delta_confidence": 0.00024306293104397683,
+   "p": 0.01,
+   "p_logical": 0.00012218801264334955,
+   "p_lower": 6.441555165149967e-07,
+   "p_lower_3sigma": 0.0,
+   "p_upper": 0.00024373186977018409,
+   "p_upper_3sigma": 0.00034999614899004945,
+   "p_vec": [
+    0.01
+   ],
+   "sigma_L": 3.541466430591824e-05,
+   "sigma_U": 3.542142640662179e-05
+  }
+ ],
+ "p_logical": 0.00012218801264334955,
+ "p_lower": 6.441555165149967e-07,
+ "p_lower_3sigma": 0.0,
+ "p_ref_vec": [
+  0.01
+ ],
+ "p_upper": 0.00024373186977018409,
+ "p_upper_3sigma": 0.00034999614899004945,
+ "partition_labels": [],
+ "partition_order": [
+  "init"
+ ],
+ "proven_successors": null,
+ "python_routing_calls": 0,
+ "renewal": false,
+ "renewal_max_attempts": null,
+ "renewal_note": "node 'REJ' is a discard node; post-selection is handled elsewhere",
+ "routing_modes": {
+  "a": "native",
+  "b": "native"
+ },
+ "sigma_L": 3.541466430591824e-05,
+ "sigma_U": 3.542142640662179e-05,
+ "single_fault_check": null,
+ "subset_rates": [
+  {
+   "branches": {
+    "b": 1.0
+   },
+   "categories": [
+    {
+     "child": "b",
+     "count": 951,
+     "kind": "succ"
+    }
+   ],
+   "fault_free": true,
+   "in_budget": true,
+   "n": 951,
+   "n_discard": 0,
+   "n_fail": 0,
+   "n_success": 0,
+   "n_trunc": 0,
+   "node": "a",
+   "path": [],
+   "path_weight": 0,
+   "q_fail_at_p_ref": 2.6000000000000005e-07,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.970299,
+   "weight": [
+    0
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 97,
+     "kind": "ok"
+    }
+   ],
+   "fault_free": true,
+   "in_budget": true,
+   "n": 97,
+   "n_discard": 0,
+   "n_fail": 0,
+   "n_success": 97,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      0
+     ]
+    }
+   ],
+   "path_weight": 0,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.970299,
+   "weight": [
+    0
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 238,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 416,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 654,
+   "n_discard": 416,
+   "n_fail": 0,
+   "n_success": 238,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      0
+     ]
+    }
+   ],
+   "path_weight": 1,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.029403,
+   "weight": [
+    1
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 8,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 92,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 100,
+   "n_discard": 92,
+   "n_fail": 0,
+   "n_success": 8,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      0
+     ]
+    }
+   ],
+   "path_weight": 2,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.000297,
+   "weight": [
+    2
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 6,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 26,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 68,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 100,
+   "n_discard": 68,
+   "n_fail": 26,
+   "n_success": 6,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      0
+     ]
+    }
+   ],
+   "path_weight": 3,
+   "q_fail_at_p_ref": 0.26,
+   "q_fail_local": 0.26,
+   "subset_prob": 1.0000000000000002e-06,
+   "weight": [
+    3
+   ]
+  },
+  {
+   "branches": {
+    "b": 0.35514018691588783
+   },
+   "categories": [
+    {
+     "child": "b",
+     "count": 266,
+     "kind": "succ"
+    },
+    {
+     "child": null,
+     "count": 483,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 749,
+   "n_discard": 483,
+   "n_fail": 0,
+   "n_success": 0,
+   "n_trunc": 0,
+   "node": "a",
+   "path": [],
+   "path_weight": 1,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.029403,
+   "weight": [
+    1
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 195,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 195,
+   "n_discard": 0,
+   "n_fail": 0,
+   "n_success": 195,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      1
+     ]
+    }
+   ],
+   "path_weight": 1,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.970299,
+   "weight": [
+    0
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 17,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 23,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 40,
+   "n_discard": 23,
+   "n_fail": 0,
+   "n_success": 17,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      1
+     ]
+    }
+   ],
+   "path_weight": 2,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.029403,
+   "weight": [
+    1
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 4,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 27,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 31,
+   "n_discard": 27,
+   "n_fail": 0,
+   "n_success": 4,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      1
+     ]
+    }
+   ],
+   "path_weight": 3,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.000297,
+   "weight": [
+    2
+   ]
+  },
+  {
+   "branches": {
+    "b": 0.15
+   },
+   "categories": [
+    {
+     "child": "b",
+     "count": 30,
+     "kind": "succ"
+    },
+    {
+     "child": null,
+     "count": 170,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 200,
+   "n_discard": 170,
+   "n_fail": 0,
+   "n_success": 0,
+   "n_trunc": 0,
+   "node": "a",
+   "path": [],
+   "path_weight": 2,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.000297,
+   "weight": [
+    2
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 19,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 19,
+   "n_discard": 0,
+   "n_fail": 0,
+   "n_success": 19,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      2
+     ]
+    }
+   ],
+   "path_weight": 2,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.970299,
+   "weight": [
+    0
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 3,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 8,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 11,
+   "n_discard": 8,
+   "n_fail": 0,
+   "n_success": 3,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      2
+     ]
+    }
+   ],
+   "path_weight": 3,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.029403,
+   "weight": [
+    1
+   ]
+  },
+  {
+   "branches": {
+    "b": 0.43
+   },
+   "categories": [
+    {
+     "child": "b",
+     "count": 43,
+     "kind": "succ"
+    },
+    {
+     "child": null,
+     "count": 57,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 100,
+   "n_discard": 57,
+   "n_fail": 0,
+   "n_success": 0,
+   "n_trunc": 0,
+   "node": "a",
+   "path": [],
+   "path_weight": 3,
+   "q_fail_at_p_ref": 0.3675585021428571,
+   "q_fail_local": 0.0,
+   "subset_prob": 1.0000000000000002e-06,
+   "weight": [
+    3
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 5,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 37,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 42,
+   "n_discard": 0,
+   "n_fail": 37,
+   "n_success": 5,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      3
+     ]
+    }
+   ],
+   "path_weight": 3,
+   "q_fail_at_p_ref": 0.8809523809523809,
+   "q_fail_local": 0.8809523809523809,
+   "subset_prob": 0.970299,
+   "weight": [
+    0
+   ]
+  },
+  {
+   "branches": {},
+   "categories": [
+    {
+     "child": null,
+     "count": 0,
+     "kind": "ok"
+    },
+    {
+     "child": null,
+     "count": 0,
+     "kind": "fail"
+    },
+    {
+     "child": null,
+     "count": 1,
+     "kind": "discard"
+    }
+   ],
+   "fault_free": false,
+   "in_budget": false,
+   "n": 1,
+   "n_discard": 1,
+   "n_fail": 0,
+   "n_success": 0,
+   "n_trunc": 0,
+   "node": "b",
+   "path": [
+    {
+     "node": "a",
+     "weight": [
+      3
+     ]
+    }
+   ],
+   "path_weight": 4,
+   "q_fail_at_p_ref": 0.0,
+   "q_fail_local": 0.0,
+   "subset_prob": 0.029403,
+   "weight": [
+    1
+   ]
+  }
+ ],
+ "t_ft": 0,
+ "t_ft_proven": null,
+ "threads_used": 1,
+ "truncated_fraction": 0.0,
+ "truncated_mass": 0.0,
+ "uncorrectable_fraction": 0.0315,
+ "uncorrectable_fraction_by_weight": {},
+ "verdict_modes": {
+  "DONE": "none"
+ },
+ "verdict_note": "This protocol post-selects: shots reaching a `discard`-kind node are removed from both sides of the ratio, so uncorrectable_fraction is p_L *conditioned on acceptance*, not per attempt. Read it together with acceptance_fraction \u2014 tightening post-selection lowers both, and either number alone can be made to look good.",
+ "verdict_sources": [
+  "protocol_predicate"
+ ],
+ "verdict_target": null,
+ "warnings": [],
+ "weight_histogram": {}
+}
